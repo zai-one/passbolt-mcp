@@ -52,7 +52,7 @@ Custody-файлы должны иметь абсолютные обычные �
 
 ## Инструменты и подтверждения
 
-- `passbolt_status`, `passbolt_search`, `passbolt_select`: `passbolt:read`.
+- `passbolt_status`, `passbolt_search`, `passbolt_select`, `passbolt_local_diagnostics`: `passbolt:read`.
 - `passbolt_create_resource`, `passbolt_update_resource`,
   `passbolt_create_folder`, `passbolt_share_resource`: `passbolt:write`.
 - `passbolt_use_secret`: `passbolt:use`.
@@ -84,6 +84,10 @@ MCP передавать нельзя. Producer API в этой версии н�
 Обработчики `secure_fill`/`out_file` выбираются из серверного реестра;
 абсолютный исполняемый файл проверяется по SHA-256, stdout/stderr подавляются.
 Примеры потребителей: `examples/sinks/`.
+
+Встроенный `https_probe` выполняет один запрос на фиксированный HTTPS-адрес:
+[диагностика и настройка](SECRET_PROBE.md). Он использует прежние проверки выбора
+и разрешений; проверка TLS включена, редиректы и повторы отключены.
 
 ## Состояние и повторы
 

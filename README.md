@@ -19,6 +19,10 @@ Try asking your assistant:
 | Find an account | Search entry metadata and select an entry for a specific URL. |
 | Keep the vault organised | Create and update entries, create folders and manage sharing within your access policy. |
 | Use a secret in an automation | Deliver a selected secret to a registered server-side handler, with a status result returned to the assistant. |
+| Check a protected endpoint | Use the built-in HTTPS probe with a selected vault credential; receive the outcome without the password or response body. |
+| Diagnose setup locally | Check key usability, the server public key and your access policy before connecting to the vault. |
+
+The [protected endpoint walkthrough](docs/SECRET_PROBE.md) includes private configuration, example requests and the local `passbolt-mcp-doctor` command.
 
 ## Quick start
 

@@ -354,7 +354,7 @@ def validate_v5_metadata(payload: Mapping[str, Any], *, strict_write: bool = Tru
 
 
 class PassboltSinkDispatcher:
-    """Deliver plaintext only to pre-registered server-local processes."""
+    """Deliver plaintext only to operator-registered processes or fixed HTTPS probes."""
 
     def __init__(self, config_file: Path | None) -> None:
         self.config_file = config_file
@@ -524,6 +524,10 @@ class PassboltSinkDispatcher:
         timeout = config.get("timeout_seconds", 30)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 120:
             raise ProviderError("Passbolt secure sink timeout is invalid")
+        if kind == "https_probe":
+            from zai_passbolt.https_probe import probe
+
+            return await probe(config, password, target_url)
         envelope = json.dumps(
             {
                 "resource_id": resource_id,

@@ -58,6 +58,11 @@ async def check():
         tools = await client.list_tools()
         assert len(tools) >= int(minimum)
         assert all(tool.name for tool in tools)
+        result = (await client.call_tool('passbolt_local_diagnostics', {})).data
+        assert result['ready'] is False
+        assert result['provider_connectivity'] == result['destination_connectivity'] == 'not_checked'
+        assert result['checks']['access_policy'] is True
+        assert result['checks']['private_key_usable'] is False
         print(json.dumps({'version': expected_version, 'tools': sorted(tool.name for tool in tools)}))
 asyncio.run(check())
 """
@@ -157,14 +162,27 @@ def main():
             env[prefix + "_SECRET_FILE"] = private(cwd / "synthetic.env", secret)
         config = cwd / "mcp.local.json"
         config.write_text(json.dumps({"env": env}), encoding="utf-8")
-        setup_command = next(name for name in project['scripts'] if name.endswith('-setup'))
-        executable = environment / ('Scripts' if os.name == 'nt' else 'bin') / (
-            setup_command + ('.exe' if os.name == 'nt' else '')
+        setup_command = next(name for name in project["scripts"] if name.endswith("-setup"))
+        executable = (
+            environment
+            / ("Scripts" if os.name == "nt" else "bin")
+            / (setup_command + (".exe" if os.name == "nt" else ""))
         )
-        snippet = json.loads(run([str(executable), '--directory', str(cwd), '--client-only'], cwd=cwd))
-        entry = next(iter(snippet['mcpServers'].values()))
-        assert Path(entry['command']).resolve() == python.resolve()
-        assert entry['args'] == ['-m', PACKAGE, '--config', str(config.resolve())]
+        snippet = json.loads(run([str(executable), "--directory", str(cwd), "--client-only"], cwd=cwd))
+        entry = next(iter(snippet["mcpServers"].values()))
+        assert Path(entry["command"]).resolve() == python.resolve()
+        assert entry["args"] == ["-m", PACKAGE, "--config", str(config.resolve())]
+        doctor = executable.with_name("passbolt-mcp-doctor" + (".exe" if os.name == "nt" else ""))
+        diagnosis = subprocess.run(
+            [str(doctor), "--config", str(config)],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+        assert diagnosis.returncode == 2
+        assert json.loads(diagnosis.stdout)["provider_connectivity"] == "not_checked"
         minimum = {
             "Keysso": 1,
             "Topvisor": 18,
@@ -172,7 +190,7 @@ def main():
             "Yandex": 47,
             "Arsenkin": 12,
             "Telegram": 7,
-            "Passbolt": 3,
+            "Passbolt": 4,
         }[NAME]
         print(
             run(

@@ -19,6 +19,16 @@ def register_tools(server: Any, runtime: Any) -> None:
     PassboltSelectionRecord = runtime.PassboltSelectionRecord
     PassboltAuditRecord = runtime.PassboltAuditRecord
 
+    @server.tool(auth=require_scopes("passbolt:read"))
+    async def passbolt_local_diagnostics() -> dict[str, Any]:
+        """Check this binding's local key usability and policy, without vault or destination requests."""
+        from zai_passbolt.doctor import diagnose
+
+        actor = current_access().principal_id
+        label = settings.bindings[actor]
+        adapter, policy_label, _ = registry.passbolt_for_binding(label)
+        return await diagnose(adapter, policy_label, settings)
+
     async def _passbolt_audit(
         scope: str,
         action: str,

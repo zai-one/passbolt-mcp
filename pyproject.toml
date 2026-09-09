@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zai-passbolt-mcp"
-version = "0.2.0"
-description = "Standalone governed Passbolt MCP service"
+version = "0.3.0"
+description = "Find, manage and use Passbolt secrets from an AI assistant without returning passwords"
 readme = "README.md"
 license = "LicenseRef-ZAI-ONE"
 license-files = ["LICENSE", "NOTICE"]
@@ -16,6 +16,7 @@ dependencies = ["httpx==0.28.1"]
 standalone = ["fastmcp==3.4.4"]
 
 [project.scripts]
+passbolt-mcp-doctor = "zai_passbolt.doctor:main"
 passbolt-mcp-setup = "zai_passbolt.setup:main"
 passbolt-mcp = "zai_passbolt.server:main"
 passbolt-approval = "zai_passbolt.approvals:main"

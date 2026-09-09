@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+from test_product_tools import PROBE, SECRET, URL, probe_transport  # noqa: F401
+from test_runtime import RESOURCE, harness
 
-from zai_passbolt.adapter import PassboltAdapter
+from zai_passbolt.adapter import PassboltAdapter, PassboltSinkDispatcher
+from zai_passbolt.doctor import diagnose
+from zai_passbolt.errors import SafeToolError
 from zai_passbolt.gpg_paths import gpg_path
 from zai_passbolt.transport import ProviderResponseError
 
@@ -135,3 +142,65 @@ async def test_active_keyring_uses_private_agent_and_cleanup(real_gpg):
     adapter.close()
     assert not runtime.exists()
     assert adapter.gpg_home.is_dir()
+
+
+def attach_policy(adapter, config):
+    path = config.secret_path.parent / "policy.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["sinks"]["fill"] = PROBE
+    path.write_text(json.dumps(document), encoding="utf-8")
+    adapter.sinks = PassboltSinkDispatcher(path)
+    adapter.service_user_id = RESOURCE
+
+
+async def test_real_gpg_doctor_success_and_missing_server_key(real_gpg, config):
+    adapter, _, _ = real_gpg
+    attach_policy(adapter, config)
+    result = await diagnose(adapter, "default", config)
+    assert result["ready"] and result["provider_connectivity"] == "not_checked"
+    adapter.server_fingerprint = "A" * 40
+    result = await diagnose(adapter, "default", config)
+    assert not result["ready"] and not result["checks"]["server_public_key_present"]
+
+
+async def test_real_decrypt_selection_probe_replay_and_no_plaintext(
+    real_gpg, config, monkeypatch, probe_transport, capsys, caplog  # noqa: F811
+):
+    adapter, fingerprint, _ = real_gpg
+    attach_policy(adapter, config)
+    encrypted = await adapter._encrypt_json({"password": SECRET}, fingerprint)
+    metadata = {"resource_id": RESOURCE, "uri": URL, "username": "local-user", "name": "Protected health"}
+    monkeypatch.setattr(adapter, "search", AsyncMock(return_value={"resources": [metadata]}))
+    requests = []
+
+    async def request(method, path, **kwargs):
+        requests.append((method, path))
+        assert method == "GET" and path == f"/secrets/resource/{RESOURCE}.json"
+        return {"body": {"data": encrypted}}
+
+    monkeypatch.setattr(adapter, "_request", request)
+    _, call = harness(config, adapter)
+    selected = await call("passbolt_select", target_url=URL)
+    args = {"selection_id": selected["selection_id"], "sink_ref": "fill"}
+    _, bob = harness(replace(config, principal_id="bob"), adapter)
+    _, read_only = harness(replace(config, local_scopes={"passbolt:read"}), adapter)
+    for denied_call, denied_args in [
+        (bob, args),
+        (read_only, args),
+        (call, {**args, "sink_ref": "other"}),
+        (call, {**args, "target_url": "https://other.example/"}),
+    ]:
+        with pytest.raises(SafeToolError):
+            await denied_call("passbolt_use_secret", **denied_args)
+    assert not requests and not probe_transport["requests"]
+    result = await call("passbolt_use_secret", **args)
+    assert result == {"delivered_to_sink": True}
+    assert len(requests) == len(probe_transport["requests"]) == 1
+    assert probe_transport["requests"][0].headers["Authorization"] == "Bearer " + SECRET
+    _, restarted = harness(config, adapter)
+    with pytest.raises(SafeToolError):
+        await restarted("passbolt_use_secret", **args)
+    assert len(requests) == 1
+    assert SECRET not in json.dumps([selected, result]) + caplog.text + capsys.readouterr().out
+    for file in config.state_path.parent.glob(config.state_path.name + "*"):
+        assert SECRET.encode() not in file.read_bytes()
