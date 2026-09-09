@@ -1,0 +1,415 @@
+{
+  "passbolt_status": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Probe real Passbolt auth and a bounded v5 decrypt canary without returning secrets."
+  },
+  "passbolt_search": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "target_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limit": {
+          "default": 20,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Search only v5 metadata decrypted inside server custody."
+  },
+  "passbolt_select": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "target_url": {
+          "type": "string"
+        },
+        "query": {
+          "default": "",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target_url"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Bind a safe metadata selection to this principal and exact target URL."
+  },
+  "passbolt_create_resource": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "secret_source": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_with_groups": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_with_users": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_mode": {
+          "default": "explicit",
+          "type": "string"
+        },
+        "resource_type": {
+          "default": "v5-default",
+          "type": "string"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "uri",
+        "username",
+        "secret_source",
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Create a v5 resource from server-generated or sealed server ingress."
+  },
+  "passbolt_update_resource": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "resource_id": {
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "expected_modified": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "resource_id",
+        "fields",
+        "expected_modified",
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Approval-gated v5 resource update with optimistic concurrency."
+  },
+  "passbolt_create_folder": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_with_groups": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_with_users": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_mode": {
+          "default": "explicit",
+          "type": "string"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name",
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Create one folder idempotently; group refs are UUID-only."
+  },
+  "passbolt_share_resource": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "resource_id": {
+          "type": "string"
+        },
+        "permission": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "groups": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "users": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "share_mode": {
+          "default": "explicit",
+          "type": "string"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "resource_id",
+        "permission",
+        "idempotency_key"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Approval-gated share; group/user references are UUID-only."
+  },
+  "passbolt_use_secret": {
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "selection_id": {
+          "type": "string"
+        },
+        "sink_ref": {
+          "type": "string"
+        },
+        "target_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "selection_id",
+        "sink_ref"
+      ],
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "description": "Deliver a selected secret to one registered server-local sink only."
+  }
+}

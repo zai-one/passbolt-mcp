@@ -1,0 +1,33 @@
+LicenseRef-ZAI-ONE
+
+Copyright (c) 2026 Aleksandr / ZAI.ONE
+
+This software is not licensed under MIT or any other open-source license.
+
+You may download, clone, install and run this software on systems you control,
+against your own Passbolt accounts or accounts you are authorized to administer,
+for your own internal use. You may configure it and connect your own MCP clients.
+Copies necessary for that permitted installation and use are allowed.
+
+Except for those permissions, you may not:
+- publish, redistribute, sublicense or sell this software;
+- create or distribute derivative works or remixes;
+- use this source to publish a competing MCP server or package.
+
+If something is missing or broken, open a GitHub Issue at:
+https://github.com/zai-one/passbolt-mcp/issues
+The copyright holder may implement changes in this repository.
+Support is not guaranteed. GitHub stars are appreciated, never required.
+
+This license applies only to ZAI.ONE-owned portions. Separately identified
+third-party components retain their own licenses and rights; see NOTICE.
+Nothing here limits rights granted by those licenses or by GitHub's Terms
+of Service for use of GitHub's own functionality.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

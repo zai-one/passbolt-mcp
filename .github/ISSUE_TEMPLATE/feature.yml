@@ -1,0 +1,10 @@
+name: Feature request
+description: Suggest an improvement to this project.
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: What are you trying to do?
+      description: Describe the scenario and expected result. Do not include private data.
+    validations:
+      required: true

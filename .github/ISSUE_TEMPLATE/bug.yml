@@ -1,0 +1,16 @@
+name: Bug report
+description: Report a reproducible problem without credentials or private data.
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version and operating system
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected result and actual result
+      description: Use synthetic examples. Never paste tokens, keys, sessions or real account data.
+    validations:
+      required: true

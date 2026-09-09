@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "profiles": {
+    "owner_one": {
+      "env_file": "/run/secrets/passbolt/profiles/owner_one.env"
+    }
+  },
+  "bindings": {
+    "owner_one_all": {
+      "profile": "owner_one",
+      "policy": "owner_all"
+    }
+  }
+}

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling==1.28.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zai-passbolt-mcp"
+version = "0.2.0"
+description = "Standalone governed Passbolt MCP service"
+readme = "README.md"
+license = "LicenseRef-ZAI-ONE"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12,<3.15"
+dependencies = ["httpx==0.28.1"]
+
+[project.optional-dependencies]
+standalone = ["fastmcp==3.4.4"]
+
+[project.scripts]
+passbolt-mcp = "zai_passbolt.server:main"
+passbolt-approval = "zai_passbolt.approvals:main"
+
+[dependency-groups]
+dev = ["fastmcp==3.4.4", "pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.15.21"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zai_passbolt"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"contracts" = "zai_passbolt/_contracts"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[project.urls]
+Homepage = "https://github.com/zai-one/passbolt-mcp"
+Issues = "https://github.com/zai-one/passbolt-mcp/issues"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "scripts", "contracts", "examples", "docs", "pyproject.toml", "uv.lock", "README.md", "README.ru.md", "INSTALL.md", "LICENSE", "NOTICE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "mcp.example.json", ".env.example", "SOURCE_PROVENANCE.json", "third_party", "vendor"]

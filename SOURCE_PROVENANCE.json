@@ -1,0 +1,8 @@
+{
+  "project": "zai-one/passbolt-mcp",
+  "version": "0.2.0",
+  "origin": "Extracted from ZAI.ONE-owned MCP platform sources; maintained independently.",
+  "history": "Private extraction history and operational evidence are archived locally, outside public releases.",
+  "changes": "See CHANGELOG.md and the public Git history.",
+  "third_party_notices": "NOTICE"
+}

@@ -1,0 +1,7 @@
+{
+  "env": {
+    "PASSBOLT_SECRET_FILE": "secrets/passbolt.env",
+    "PASSBOLT_BINDINGS_FILE": "secrets/bindings.json",
+    "PASSBOLT_STATE_PATH": "state/passbolt.sqlite"
+  }
+}
