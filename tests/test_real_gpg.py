@@ -68,7 +68,7 @@ def real_gpg(tmp_path):
                 check=False,
             )
 
-    stop_agent(home)  # Do not copy live agent sockets into the adapter's private runtime.
+    # Keep the source agent active, as it is immediately after an operator imports a key.
     adapter = PassboltAdapter(
         "https://vault.example",
         service_user_id="fixture-user",
@@ -81,8 +81,6 @@ def real_gpg(tmp_path):
     try:
         yield adapter, fingerprint, stop_agent
     finally:
-        if adapter._runtime_gpg_home:
-            stop_agent(adapter._runtime_gpg_home)
         adapter.close()
         stop_agent(home)
 
@@ -111,3 +109,17 @@ async def test_corrupt_ciphertext_and_wrong_passphrase_fail_closed(real_gpg, tmp
     with pytest.raises(ProviderResponseError) as failure:
         await adapter._decrypt_json(encrypted, expected_signer=fingerprint)
     assert "synthetic-payload" not in str(failure.value)
+
+
+async def test_active_keyring_uses_private_agent_and_cleanup(real_gpg):
+    adapter, fingerprint, _ = real_gpg
+    runtime = adapter._writable_gpg_home()
+    assert runtime != adapter.gpg_home
+    assert not list(runtime.glob("S.gpg-agent*")), "source agent sockets must not be copied"
+    ciphertext = await adapter._encrypt_json({"password": "synthetic-isolated"}, fingerprint)
+    assert await adapter._decrypt_json(ciphertext, expected_signer=fingerprint) == {
+        "password": "synthetic-isolated"
+    }
+    adapter.close()
+    assert not runtime.exists()
+    assert adapter.gpg_home.is_dir()

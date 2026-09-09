@@ -676,13 +676,40 @@ class PassboltAdapter:
             raise ProviderResponseError("Passbolt GPG custody is not configured")
         if self._runtime_gpg_home is None:
             target = Path(tempfile.mkdtemp(prefix="mcp-passbolt-gnupg-"))
-            shutil.copytree(self.gpg_home, target, dirs_exist_ok=True)
-            target.chmod(0o700)
+            try:
+                shutil.copytree(
+                    self.gpg_home,
+                    target,
+                    dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("S.gpg-agent*", "S.dirmngr*", "*.lock", ".#lk*"),
+                )
+                target.chmod(0o700)
+            except OSError:
+                shutil.rmtree(target, ignore_errors=True)
+                raise ProviderResponseError("Passbolt private GPG runtime could not be prepared") from None
             self._runtime_gpg_home = target
         return self._runtime_gpg_home
 
     def close(self) -> None:
         if self._runtime_gpg_home is not None:
+            # Kill only the agent for this generated private runtime, never the
+            # operator's source keyring. Release open handles before removing keys.
+            gpgconf = shutil.which("gpgconf")
+            if gpgconf:
+                with suppress(OSError, subprocess.SubprocessError):
+                    subprocess.run(
+                        [
+                            gpgconf,
+                            "--homedir",
+                            gpg_path(gpgconf, self._runtime_gpg_home),
+                            "--kill",
+                            "gpg-agent",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=10,
+                        check=False,
+                    )
             shutil.rmtree(self._runtime_gpg_home, ignore_errors=True)
             self._runtime_gpg_home = None
 
