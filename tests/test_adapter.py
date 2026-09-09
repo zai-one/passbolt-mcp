@@ -29,7 +29,7 @@ REFRESH_FIXTURE = "refresh"
 EMBEDDED_PASSPHRASE_FIXTURE = "must-not-be-imported"  # noqa: S105 -- negative fixture
 SINK_SECRET_FIXTURE = "sink-only-value"  # noqa: S105 -- sink-only test fixture
 JWT_FIXTURE = "e30.eyJleHAiOjQxMDI0NDQ4MDB9.signature"  # noqa: S105 -- unsigned test JWT
-PYTHON_EXECUTABLE = Path(sys.executable).resolve()
+PYTHON_EXECUTABLE = Path(os.environ.get("PASSBOLT_TEST_SINK_PYTHON", sys.executable)).resolve()
 PYTHON_EXECUTABLE_SHA256 = hashlib.sha256(PYTHON_EXECUTABLE.read_bytes()).hexdigest()
 
 

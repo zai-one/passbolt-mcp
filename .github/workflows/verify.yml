@@ -19,6 +19,8 @@ jobs:
       - run: uv sync --frozen --all-groups --extra standalone
       - name: Require real GPG crypto checks on Linux
         if: runner.os == 'Linux'
-        run: echo "REQUIRE_GPG_TESTS=1" >> "$GITHUB_ENV"
+        run: |
+          echo "REQUIRE_GPG_TESTS=1" >> "$GITHUB_ENV"
+          echo "PASSBOLT_TEST_SINK_PYTHON=$(readlink -f /usr/bin/python3)" >> "$GITHUB_ENV"
       - run: uv run --frozen --extra standalone python scripts/verify.py
       - run: uv run --frozen --extra standalone python scripts/verify_install.py

@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -14,15 +16,23 @@ from zai_passbolt.transport import ProviderResponseError
 
 
 @pytest.fixture
-def real_gpg(tmp_path):
+def gpg_directory():
+    # GPG/MSYS agent socket paths have a shorter limit than ordinary file paths.
+    # Pytest's per-test path plus a hosted runner username can exceed that limit.
+    with tempfile.TemporaryDirectory(prefix="pg-") as directory:
+        yield Path(directory)
+
+
+@pytest.fixture
+def real_gpg(gpg_directory):
     gpg = shutil.which("gpg")
     if not gpg:
         if os.environ.get("REQUIRE_GPG_TESTS") == "1":
             pytest.fail("GnuPG is required by this release gate")
         pytest.skip("GnuPG unavailable; Linux release CI requires this fixture")
-    home = tmp_path / "gnupg"
+    home = gpg_directory / "gnupg"
     home.mkdir(mode=0o700)
-    password = tmp_path / "passphrase"
+    password = gpg_directory / "passphrase"
     password.write_text("synthetic-ephemeral-passphrase", encoding="utf-8")
     password.chmod(0o600)
     prefix = [
@@ -36,7 +46,7 @@ def real_gpg(tmp_path):
         "--passphrase-file",
         gpg_path(gpg, password),
     ]
-    subprocess.run(
+    generation = subprocess.run(
         [
             *prefix,
             "--quick-generate-key",
@@ -45,10 +55,12 @@ def real_gpg(tmp_path):
             "sign,encr",
             "1d",
         ],
-        check=True,
+        check=False,
         capture_output=True,
+        text=True,
         timeout=60,
     )
+    assert generation.returncode == 0, generation.stderr  # Synthetic test keyring only.
     listing = subprocess.run(
         [*prefix, "--with-colons", "--list-secret-keys"],
         check=True,
@@ -76,7 +88,7 @@ def real_gpg(tmp_path):
         server_fingerprint=fingerprint,
         gpg_home=home,
         passphrase_file=password,
-        token_file=tmp_path / "tokens.json",
+        token_file=gpg_directory / "tokens.json",
     )
     try:
         yield adapter, fingerprint, stop_agent
