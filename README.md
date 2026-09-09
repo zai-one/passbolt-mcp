@@ -92,6 +92,12 @@ Tests use synthetic fixtures. A passing test run does not establish live provide
 
 </details>
 
+## Talk about your integration
+
+Want to connect this MCP to your team’s workflows? [Get in touch on Telegram](https://t.me/zai_one) to discuss your setup and integration.
+
+A project by [ZAI.ONE](https://zai.one).
+
 ## Use and feedback
 
 You may install and use this project for your own accounts under [LicenseRef-ZAI-ONE](LICENSE).
