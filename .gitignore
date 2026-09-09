@@ -15,3 +15,7 @@ mcp.local.json
 
 # Private extraction receipts stay local.
 Service/
+
+# Generated local MCP client snippets contain machine-specific paths.
+mcp-client.json
+mcp-client.toml

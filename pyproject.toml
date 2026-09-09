@@ -16,6 +16,7 @@ dependencies = ["httpx==0.28.1"]
 standalone = ["fastmcp==3.4.4"]
 
 [project.scripts]
+passbolt-mcp-setup = "zai_passbolt.setup:main"
 passbolt-mcp = "zai_passbolt.server:main"
 passbolt-approval = "zai_passbolt.approvals:main"
 

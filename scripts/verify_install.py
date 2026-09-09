@@ -34,6 +34,23 @@ package, distribution, expected_version, config, minimum, child = sys.argv[1:]
 module = importlib.import_module(package)
 assert importlib.metadata.version(distribution) == expected_version == module.__version__
 assert pathlib.Path(sys.prefix).resolve() in pathlib.Path(module.__file__).resolve().parents
+# Exercise the installed wizard with synthetic inputs, outside the source checkout.
+from unittest.mock import patch
+setup = importlib.import_module(package + '.setup')
+original_env = json.loads(pathlib.Path(config).read_text(encoding='utf-8'))['env']
+private_file = next((v for k, v in original_env.items() if k.endswith('_SECRET_FILE')), '')
+def prompt(text):
+    return private_file if '_SECRET_FILE' in text else '12345'
+with (
+    patch('builtins.input', prompt),
+    patch.object(setup.getpass, 'getpass', lambda _: 'synthetic-install-token'),
+):
+    configured = setup.configure(pathlib.Path(config).parent / 'installed-wizard')
+snippet = json.loads(configured.with_name('mcp-client.json').read_text(encoding='utf-8'))
+entry = snippet['mcpServers'][setup.SERVICE]
+assert entry['command'] == sys.executable
+assert entry['args'] == ['-m', package, '--config', str(configured)]
+config = str(configured)
 async def check():
     transport = StdioTransport(command=sys.executable, args=['-c', child, package, config],
                                cwd=str(pathlib.Path(config).parent), keep_alive=False)
@@ -140,6 +157,14 @@ def main():
             env[prefix + "_SECRET_FILE"] = private(cwd / "synthetic.env", secret)
         config = cwd / "mcp.local.json"
         config.write_text(json.dumps({"env": env}), encoding="utf-8")
+        setup_command = next(name for name in project['scripts'] if name.endswith('-setup'))
+        executable = environment / ('Scripts' if os.name == 'nt' else 'bin') / (
+            setup_command + ('.exe' if os.name == 'nt' else '')
+        )
+        snippet = json.loads(run([str(executable), '--directory', str(cwd), '--client-only'], cwd=cwd))
+        entry = next(iter(snippet['mcpServers'].values()))
+        assert Path(entry['command']).resolve() == python.resolve()
+        assert entry['args'] == ['-m', PACKAGE, '--config', str(config.resolve())]
         minimum = {
             "Keysso": 1,
             "Topvisor": 18,
@@ -165,7 +190,11 @@ def main():
                 cwd=cwd,
             ).strip()
         )
-        print(json.dumps({"clean_install": True, "stdio": True, "external_sockets": "blocked"}))
+        print(
+            json.dumps(
+                {"clean_install": True, "installed_setup": True, "stdio": True, "external_sockets": "blocked"}
+            )
+        )
 
 
 if __name__ == "__main__":

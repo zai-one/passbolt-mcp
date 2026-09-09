@@ -1,5 +1,39 @@
 # Install and integrate Passbolt MCP
 
+## Install a release package
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and download the
+wheel `zai_passbolt_mcp-0.3.0-py3-none-any.whl` plus `SHA256SUMS.txt` from [v0.3.0](https://github.com/zai-one/passbolt-mcp/releases/tag/v0.3.0).
+Compare the wheel's SHA-256 with the published checksum before installing it.
+The wheel is platform-independent; Python 3.12–3.14 is required.
+
+```sh
+uv tool install "zai-passbolt-mcp[standalone] @ https://github.com/zai-one/passbolt-mcp/releases/download/v0.3.0/zai_passbolt_mcp-0.3.0-py3-none-any.whl"
+passbolt-mcp-setup --directory /absolute/path/to/my-passbolt-settings
+passbolt-mcp --config /absolute/path/to/my-passbolt-settings/mcp.local.json --check-config
+```
+
+The setup command runs in your terminal and keeps credentials out of command-line
+arguments. It writes `mcp-client.json` and `mcp-client.toml` next to your configuration.
+Merge the JSON entry into Claude Desktop/Cursor, or the TOML table into Codex.
+For VS Code, reuse the entry under its `servers` object. Existing client settings
+are never edited automatically. The snippet uses the installed Python executable
+and an absolute config path, so the server can start from any working directory.
+
+Windows accepts paths such as `C:/Users/you/mcp/passbolt`; quote paths containing
+spaces. If your shell cannot find installed commands, run `uv tool update-shell`
+and open a new terminal. Keep the uv tool environment: removing it invalidates its
+client snippet. After reinstalling or moving the environment, regenerate it with:
+
+```sh
+passbolt-mcp-setup --directory /absolute/path/to/my-passbolt-settings --client-only
+passbolt-mcp-setup --directory /absolute/path/to/my-passbolt-settings --client-only --format toml
+```
+
+These commands only print client configuration. They do not read credential
+contents, overwrite files, contact a provider or start a server. The checkout
+workflow below remains available.
+
 ## From a clone or source ZIP
 
 Follow [Quick start](README.md#quick-start). A source ZIP works with the same commands
