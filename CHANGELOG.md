@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Add request-local, closed-vocabulary readiness stage/reason logs without exception text or secret material; retain the three-boolean MCP status contract.
+- Distinguish metadata key trust checks, metadata decryption, secret fetching and secret decryption without relaxing any trust predicate.
+- Test concurrent/cancelled probes, malformed key envelopes, real-GPG diagnostic refusal and approved encrypted password updates with disposable keys.
+- Document embedded composition, registered authentication handlers and the distinction between updating a vault record and rotating a website password.
+
 ## 0.3.0
 
 - Installable setup wizard and JSON/TOML client snippets that work outside the checkout.
