@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Passbolt 5.12 PIN code resources (`v5-pin-code`): their metadata has no `uris`, which previously failed the whole
+  search. They are now listed by name and description. The PIN is never returned, and `passbolt_use_secret`
+  refuses to deliver it.
+- Search and select results carry `resource_type` (the Passbolt slug, or `unknown`) derived from `resource_type_id`.
+- Read mode accepts the documented 32 `uris` per v5 resource (writes stay limited to 10).
+- Tests assert that passwords, PINs, secure notes and encrypted payloads never appear in search, select or use results.
+
 ## 0.3.0
 
 - Installable setup wizard and JSON/TOML client snippets that work outside the checkout.

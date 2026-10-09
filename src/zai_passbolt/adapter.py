@@ -36,6 +36,24 @@ MAX_RESULTS = 50
 MAX_QUERY_LENGTH = 256
 MAX_RESOURCE_SCAN = 2_000
 V5_DEFAULT_RESOURCE_TYPE_ID = "dd1f723d-0d1e-513f-8218-4055dc0530d0"
+V5_PIN_CODE_RESOURCE_TYPE_ID = "4357bbc7-ed4d-52ff-b59d-9f7f17881bb3"
+# Passbolt derives resource type ids as UUIDv5(PASSBOLT_SEED, "resource-types.id.<slug>")
+# (passbolt_api ResourceType entity). Only the slug label is projected to MCP callers.
+RESOURCE_TYPE_SLUGS = {
+    "669f8c64-242a-59fb-92fc-81f660975fd3": "password-string",
+    "a28a04cd-6f53-518a-967c-9963bf9cec51": "password-and-description",
+    "05ba5c75-504d-5ad6-819a-83af68867d86": "totp",
+    "8cca88d9-a3f6-56df-b860-3ef08de5c5c4": "password-description-totp",
+    "761e5863-e17e-5ded-b3c2-76ffd5d0a2dc": "v5-password-string",
+    V5_DEFAULT_RESOURCE_TYPE_ID: "v5-default",
+    "bb2280b5-c4d9-569c-9337-62b307f1139c": "v5-totp-standalone",
+    "7438294d-f71c-5164-ba95-d9e60e295564": "v5-default-with-totp",
+    "0551544e-2ccd-5ce8-95cf-86f0aab0f827": "v5-custom-fields",
+    "0a72c76b-b8e6-53f0-8bef-0a8ca6b5c764": "v5-note",
+    V5_PIN_CODE_RESOURCE_TYPE_ID: "v5-pin-code",
+}
+# Existing v5 metadata may carry up to 32 uris; v5-pin-code (5.12+) has none.
+MAX_READ_URIS = 32
 RESOURCE_METADATA_OBJECT_TYPE = "PASSBOLT_RESOURCE_METADATA"
 SECRET_DATA_OBJECT_TYPE = "PASSBOLT_SECRET_DATA"  # noqa: S105 -- schema discriminator
 METADATA_PRIVATE_KEY_OBJECT_TYPE = (  # noqa: S105 -- schema discriminator
@@ -301,6 +319,9 @@ def safe_resource(value: Any) -> dict[str, Any]:
             result[key] = str(item)[:2048] if isinstance(item, str) else item
     if "id" in result:
         result["resource_id"] = result.pop("id")
+    type_id = value.get("resource_type_id")
+    if isinstance(type_id, str) and type_id:
+        result["resource_type"] = RESOURCE_TYPE_SLUGS.get(type_id.lower(), "unknown")
     return result
 
 
@@ -332,8 +353,12 @@ def validate_v5_metadata(payload: Mapping[str, Any], *, strict_write: bool = Tru
     username = _text(payload.get("username"), "username", 255)
     description = _text(payload.get("description"), "description", 10_000)
     uris = payload.get("uris")
-    if not isinstance(uris, list) or len(uris) > 10:
-        raise ValueError("Passbolt v5 metadata uris must be a list with at most 10 entries")
+    if not strict_write and uris is None:
+        # v5-pin-code metadata has no uris field (Passbolt 5.12+).
+        uris = []
+    max_uris = 10 if strict_write else MAX_READ_URIS
+    if not isinstance(uris, list) or len(uris) > max_uris:
+        raise ValueError(f"Passbolt v5 metadata uris must be a list with at most {max_uris} entries")
     if strict_write:
         normalized_uris = [_https_url(item, "uri") for item in uris if isinstance(item, str) and item]
         if len(normalized_uris) != len(uris):
@@ -1911,6 +1936,9 @@ class PassboltAdapter:
         secret = await self._secret_payload(resource_id)
         password = secret.get("password")
         if not isinstance(password, str) or not password:
+            if "pin_code" in secret:
+                # PIN codes are not credentials for a target URL; keep them in the vault.
+                raise ProviderResponseError("Passbolt PIN code resources cannot be delivered to a sink")
             raise ProviderResponseError("Passbolt decrypted secret has no password")
         delivered = await self.sinks.deliver(
             sink_ref,
