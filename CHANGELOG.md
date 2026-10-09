@@ -7,6 +7,10 @@
   refuses to deliver it.
 - Search and select results carry `resource_type` (the Passbolt slug, or `unknown`) derived from `resource_type_id`.
 - Read mode accepts the documented 32 `uris` per v5 resource (writes stay limited to 10).
+- `passbolt_check_update`: suggests a newer GitHub release with its notes link and update command;
+  public API, 3 s timeout, 24 h cache, graceful offline, never auto-updates and never touches the vault.
+  A cached "update available" hint appears in server instructions and `passbolt_status`.
+  Opt out with `PASSBOLT_DISABLE_UPDATE_CHECK=1`.
 - MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool.
 - Tests assert that passwords, PINs, secure notes and encrypted payloads never appear in search, select or use results.
 

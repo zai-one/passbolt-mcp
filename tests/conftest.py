@@ -16,6 +16,8 @@ def no_external_network(monkeypatch):
         raise AssertionError("external network is prohibited in synthetic tests")
 
     monkeypatch.setattr(socket.socket, "connect", guarded)
+    # Update-check tests re-enable it with mocked HTTP only.
+    monkeypatch.setenv("PASSBOLT_DISABLE_UPDATE_CHECK", "1")
 
 
 @pytest.fixture

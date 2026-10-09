@@ -100,6 +100,17 @@ Tests use synthetic fixtures. A passing test run does not establish live provide
 
 </details>
 
+## Updates
+
+Ask your assistant to run `passbolt_check_update`. It compares the installed version with the
+[latest release](https://github.com/zai-one/passbolt-mcp/releases) through the public GitHub API
+(no credentials, no vault access, 3-second timeout, result cached for 24 hours next to the state file) and
+returns the current and latest versions, the release notes link and the matching update command
+(`git pull --ff-only && uv sync --frozen --extra standalone` for a checkout, `uv tool install --force ...` for a release package).
+When a newer version is already known from the cache, the server mentions it once in its startup
+instructions and in `passbolt_status`. Nothing is ever installed automatically. Offline, the check
+reports `status: unknown` and the server keeps working. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off.
+
 ## Built by ZAI.ONE
 
 [ZAI.ONE](https://zai.one) is a digital agency working on websites, SEO, advertising and analytics. We also build tools that connect AI assistants to everyday work. [Talk to us on Telegram](https://t.me/zai_one) about setup, automation or an integration for your team.

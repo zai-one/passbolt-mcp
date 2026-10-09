@@ -180,7 +180,7 @@ class Runtime:
         try:
             self.authorize(tool)
             actor = self.identity()
-            if not self.config.enabled and tool != "passbolt_status":
+            if not self.config.enabled and tool not in {"passbolt_status", "passbolt_check_update"}:
                 raise PermissionError("provider is disabled")
             if len(canonical_json(arguments).encode()) > 1_048_576:
                 raise ValueError("request exceeds bounded input size")

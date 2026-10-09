@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+from zai_passbolt import update_check
 from zai_passbolt.adapter import PassboltAccessPolicy, PassboltAdapter
 from zai_passbolt.transport import LocalPreDispatchDenied, ProviderError, ProviderHttpError, request_hash
 
@@ -36,6 +37,10 @@ SECRET_USE: dict[str, bool] = {
     "idempotentHint": False,
     "openWorldHint": True,
 }
+
+
+def update_cache_path(settings: Any) -> Any:
+    return settings.state_path.parent / "update-check.json"
 
 
 def register_tools(server: Any, runtime: Any) -> None:
@@ -463,8 +468,24 @@ def register_tools(server: Any, runtime: Any) -> None:
             await _passbolt_audit("passbolt:read", "status", "error")
             raise
         result["provider_enabled"] = True
+        # Cache-only hint: the status probe never contacts GitHub.
+        known = update_check.cached_status(update_cache_path(settings))
+        if known and known["update_available"]:
+            result["update"] = {
+                key: known[key]
+                for key in ("current_version", "latest_version", "release_notes_url", "update_command")
+            }
         await _passbolt_audit("passbolt:read", "status", "success")
         return result
+
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
+    async def passbolt_check_update(force: bool = False) -> dict[str, Any]:
+        """Check whether a newer Passbolt MCP release exists on GitHub. Suggests, never installs.
+
+        Uses the public GitHub API with a short timeout and a 24h cache; never contacts the vault.
+        Set PASSBOLT_DISABLE_UPDATE_CHECK=1 to turn it off.
+        """
+        return await update_check.check_for_update(update_cache_path(settings), force=force)
 
     @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_search(query: str, target_url: str | None = None, limit: int = 20) -> dict[str, Any]:
