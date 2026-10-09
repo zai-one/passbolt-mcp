@@ -7,6 +7,7 @@
   refuses to deliver it.
 - Search and select results carry `resource_type` (the Passbolt slug, or `unknown`) derived from `resource_type_id`.
 - Read mode accepts the documented 32 `uris` per v5 resource (writes stay limited to 10).
+- MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool.
 - Tests assert that passwords, PINs, secure notes and encrypted payloads never appear in search, select or use results.
 
 ## 0.3.0

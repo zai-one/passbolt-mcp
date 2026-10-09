@@ -115,3 +115,15 @@ async def test_stdio_enforces_local_scope_even_with_writes_enabled(config):
         with pytest.raises(ToolError):
             await client.call_tool("passbolt_create_resource", CREATE)
     assert not adapter.calls
+
+
+async def test_tool_annotations_match_side_effects(config):
+    async with Client(create_server(config, transport="stdio", adapter=FixtureAdapter())) as client:
+        tools = {tool.name: tool.annotations for tool in await client.list_tools()}
+    for name in ("passbolt_status", "passbolt_search", "passbolt_select", "passbolt_local_diagnostics"):
+        assert tools[name].readOnlyHint is True and tools[name].destructiveHint is False, name
+    for name in ("passbolt_update_resource", "passbolt_share_resource"):
+        assert tools[name].readOnlyHint is False and tools[name].destructiveHint is True, name
+    for name in ("passbolt_create_resource", "passbolt_create_folder", "passbolt_use_secret"):
+        assert tools[name].readOnlyHint is False and tools[name].destructiveHint is False, name
+    assert tools["passbolt_use_secret"].idempotentHint is False
