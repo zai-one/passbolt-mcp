@@ -11,6 +11,8 @@ from zai_passbolt.adapter import (
     V5_DEFAULT_RESOURCE_TYPE_ID,
     V5_PIN_CODE_RESOURCE_TYPE_ID,
     PassboltAdapter,
+    preserved_v5_default_metadata,
+    preserved_v5_default_secret_fields,
     validate_v5_metadata,
     validate_v5_pin_code_metadata,
 )
@@ -181,13 +183,20 @@ MODIFIED = "2026-10-01T00:00:00Z"
 class UpdateVaultAdapter(PassboltAdapter):
     """One existing resource; records every encryption and the PUT payload."""
 
-    def __init__(self, resource_type_id: str, metadata: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        resource_type_id: str,
+        metadata: dict[str, Any],
+        existing_secret: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__("https://passbolt.example", "fixture-token", user_fingerprint="D" * 40)
         self.resource_type_id = resource_type_id
         self.metadata = metadata
+        self.existing_secret = existing_secret if existing_secret is not None else default_secret()
         self.encrypted: list[dict[str, Any]] = []
         self.requests: list[tuple[str, str, dict[str, Any] | None]] = []
         self.secret_source_read = False
+        self.secret_reads = 0
 
     async def _resource(self, resource_id: str) -> dict[str, Any]:
         assert resource_id == PIN_RESOURCE_ID
@@ -218,6 +227,11 @@ class UpdateVaultAdapter(PassboltAdapter):
         self.secret_source_read = True
         return PASSWORD_FIXTURE, None
 
+    async def _secret_payload(self, resource_id: str) -> dict[str, Any]:
+        assert resource_id == PIN_RESOURCE_ID
+        self.secret_reads += 1
+        return json.loads(json.dumps(self.existing_secret))
+
     async def _encrypted_secrets_for_resource(
         self, resource: Any, secret_payload: Any
     ) -> list[dict[str, str]]:
@@ -234,6 +248,43 @@ class UpdateVaultAdapter(PassboltAdapter):
         return await self.update_resource(
             resource_id=PIN_RESOURCE_ID, fields=fields, expected_modified=MODIFIED
         )
+
+
+OLD_PASSWORD = "old-password-must-not-leak"  # noqa: S105 -- negative fixture
+SECRET_NOTE = "secret-note-must-not-leak"
+SECRET_FIELD_VALUE = "secret-field-must-not-leak"
+FIELD_ID = "6f1c2c3e-1b7a-4c55-9a0e-2f9d8c7b6a51"
+
+
+def default_secret(**extra: Any) -> dict[str, Any]:
+    return {
+        "object_type": "PASSBOLT_SECRET_DATA",
+        "password": OLD_PASSWORD,
+        "description": None,
+        "custom_fields": [],
+        **extra,
+    }
+
+
+def rich_metadata(**extra: Any) -> dict[str, Any]:
+    """v5-default metadata using every schema property: several uris, an icon, custom fields."""
+    return {
+        **default_metadata(),
+        "uris": ["https://example.com/login", "https://other.example/sso", "android://app.example"],
+        "icon": {"type": "passbolt-icon-set", "value": 7, "background_color": "#A1B2C3"},
+        "custom_fields": [
+            {"id": FIELD_ID, "type": "text", "metadata_key": "Account number"},
+            {"id": "7a2d3c4b-5e6f-4a1b-8c9d-0e1f2a3b4c5d", "type": "boolean", "metadata_value": True},
+        ],
+        **extra,
+    }
+
+
+def rich_secret() -> dict[str, Any]:
+    return default_secret(
+        description=SECRET_NOTE,
+        custom_fields=[{"id": FIELD_ID, "type": "text", "secret_value": SECRET_FIELD_VALUE}],
+    )
 
 
 def default_metadata() -> dict[str, Any]:
@@ -255,7 +306,7 @@ async def test_pin_code_metadata_update_keeps_type_and_never_touches_the_secret(
     [(method, _path, payload)] = adapter.requests
     assert method == "PUT" and payload is not None
     assert payload["resource_type_id"] == V5_PIN_CODE_RESOURCE_TYPE_ID
-    assert "secrets" not in payload and not adapter.secret_source_read
+    assert "secrets" not in payload and not adapter.secret_source_read and adapter.secret_reads == 0
     # Only the metadata was encrypted, in the exact v5-pin-code shape with the icon preserved.
     assert adapter.encrypted == [
         {
@@ -344,8 +395,141 @@ async def test_default_update_keeps_default_shape_and_rotates_password() -> None
     assert payload["secrets"] == [{"user_id": "service", "data": "armored-secret"}]
     metadata, secret = adapter.encrypted
     assert metadata == {**default_metadata(), "username": "new-user"}
-    assert secret["password"] == PASSWORD_FIXTURE and secret["object_type"] == "PASSBOLT_SECRET_DATA"
+    assert secret == {**default_secret(), "password": PASSWORD_FIXTURE}
     assert PASSWORD_FIXTURE not in json.dumps(result)
+
+
+async def test_default_metadata_update_keeps_all_uris_icon_and_custom_fields() -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata())
+    await adapter.update({"name": "Renamed", "description": None})
+    [(method, _path, payload)] = adapter.requests
+    assert method == "PUT" and payload is not None and "secrets" not in payload
+    [metadata] = adapter.encrypted
+    assert metadata == {**rich_metadata(), "name": "Renamed", "description": None}
+    # A metadata-only update never decrypts the secret.
+    assert adapter.secret_reads == 0 and not adapter.secret_source_read
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        # uri addresses the primary (first) uri only; the others are always kept.
+        (
+            "https://new.example/login",
+            ["https://new.example/login", "https://other.example/sso", "android://app.example"],
+        ),
+        (None, ["https://other.example/sso", "android://app.example"]),
+        ("", ["https://other.example/sso", "android://app.example"]),
+    ],
+)
+async def test_default_uri_update_changes_only_the_primary_uri(uri: str | None, expected: list[str]) -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata())
+    await adapter.update({"uri": uri})
+    [metadata] = adapter.encrypted
+    assert metadata == {**rich_metadata(), "uris": expected}
+
+
+async def test_default_uri_update_adds_a_primary_uri_when_there_is_none() -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, {**default_metadata(), "uris": []})
+    await adapter.update({"uri": "https://new.example"})
+    assert adapter.encrypted[0]["uris"] == ["https://new.example"]
+
+
+@pytest.mark.parametrize(
+    "uri", ["http://insecure.example", "https://user:pw@example.com", 7, "https://example.com/" + "x" * 1100]
+)
+async def test_default_uri_update_rejects_invalid_uri_without_any_write(uri: Any) -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata())
+    with pytest.raises(ValueError, match="uri"):
+        await adapter.update({"uri": uri})
+    assert adapter.requests == [] and adapter.encrypted == []
+
+
+async def test_default_password_rotation_keeps_secret_note_and_custom_fields() -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata(), rich_secret())
+    result = await adapter.update({"secret_source": {"kind": "server_generated"}})
+    metadata, secret = adapter.encrypted
+    assert metadata == rich_metadata()
+    assert secret == {**rich_secret(), "password": PASSWORD_FIXTURE}
+    assert adapter.secret_reads == 1
+    visible = json.dumps([result, adapter.requests])
+    for value in (OLD_PASSWORD, PASSWORD_FIXTURE, SECRET_NOTE, SECRET_FIELD_VALUE):
+        assert value not in visible
+
+
+BAD_FIELD = {"id": FIELD_ID, "type": "text"}
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        rich_metadata(totp={"secret_key": "x"}),  # property outside v5-default
+        rich_metadata(uris=[f"https://h{i}.example" for i in range(33)]),
+        rich_metadata(uris=["https://example.com/" + "x" * 1100]),
+        rich_metadata(uris=[42]),
+        rich_metadata(icon={"type": "unknown-set"}),
+        rich_metadata(custom_fields=[{**BAD_FIELD, "type": "date"}]),
+        rich_metadata(custom_fields=[{**BAD_FIELD, "id": "not-a-uuid"}]),
+        rich_metadata(custom_fields=[{**BAD_FIELD, "secret_value": "misplaced"}]),
+        rich_metadata(custom_fields=[{**BAD_FIELD, "metadata_value": {"nested": 1}}]),
+        rich_metadata(custom_fields=[{**BAD_FIELD, "metadata_value": float("nan")}]),
+        rich_metadata(custom_fields=[BAD_FIELD] * 129),
+        rich_metadata(custom_fields={"not": "a list"}),
+        rich_metadata(name="x" * 256),
+        rich_metadata(username=["not", "text"]),
+    ],
+)
+async def test_default_metadata_outside_its_schema_fails_closed_before_any_write(
+    metadata: dict[str, Any],
+) -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, metadata)
+    with pytest.raises(ValueError, match="outside its schema|icon is invalid"):
+        await adapter.update({"name": "Renamed", "secret_source": {"kind": "server_generated"}})
+    assert adapter.requests == [] and adapter.encrypted == []
+    assert adapter.secret_reads == 0 and not adapter.secret_source_read
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        default_secret(totp={"secret_key": SECRET_FIELD_VALUE}),  # property outside v5-default
+        default_secret(object_type="PASSBOLT_OTHER"),
+        default_secret(description=SECRET_NOTE * 3000),
+        default_secret(custom_fields=[{**BAD_FIELD, "metadata_key": SECRET_FIELD_VALUE}]),
+        default_secret(custom_fields=[{**BAD_FIELD, "secret_value": [SECRET_FIELD_VALUE]}]),
+        default_secret(custom_fields=[{**BAD_FIELD, "id": SECRET_FIELD_VALUE}]),
+        ["not", "an", "object"],
+    ],
+)
+async def test_default_secret_outside_its_schema_fails_closed_before_any_write(secret: Any) -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata(), secret)
+    with pytest.raises(ValueError, match="secret has fields outside its schema") as raised:
+        await adapter.update({"secret_source": {"kind": "server_generated"}})
+    # Refused before the new password is read, before any encryption and before the PUT.
+    assert adapter.requests == [] and adapter.encrypted == [] and not adapter.secret_source_read
+    message = str(raised.value) + repr(raised.value.__cause__) + repr(raised.value.__context__)
+    for value in (OLD_PASSWORD, SECRET_NOTE, SECRET_FIELD_VALUE):
+        assert value not in message
+
+
+async def test_invalid_secret_source_is_refused_before_the_secret_is_decrypted() -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, rich_metadata(), rich_secret())
+    with pytest.raises(ValueError, match="secret_source"):
+        await adapter.update({"secret_source": {"kind": "plaintext", "value": "x"}})
+    assert adapter.secret_reads == 0 and adapter.requests == [] and adapter.encrypted == []
+
+
+def test_preservation_validators_follow_the_v5_default_schema() -> None:
+    assert preserved_v5_default_metadata(rich_metadata()) == rich_metadata()
+    legacy = {key: value for key, value in default_metadata().items() if key != "custom_fields"}
+    assert preserved_v5_default_metadata({**legacy, "uris": None, "extra": None})["custom_fields"] == []
+    kept = preserved_v5_default_secret_fields(rich_secret())
+    assert kept == {"description": SECRET_NOTE, "custom_fields": rich_secret()["custom_fields"]}
+    assert "password" not in kept
+    assert preserved_v5_default_secret_fields({"password": OLD_PASSWORD}) == {
+        "description": None,
+        "custom_fields": [],
+    }
 
 
 def test_pin_code_metadata_validator_checks_icon_schema() -> None:

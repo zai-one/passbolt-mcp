@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -60,6 +61,15 @@ UPDATABLE_RESOURCE_TYPE_IDS = frozenset({V5_DEFAULT_RESOURCE_TYPE_ID, V5_PIN_COD
 # v5-pin-code metadata properties per passbolt_api SlugDefinition::v5PinCode(): name, description, icon.
 PIN_CODE_UPDATE_FIELDS = frozenset({"name", "description"})
 _PIN_CODE_METADATA_KEYS = frozenset({"object_type", "resource_type_id", "name", "description", "icon"})
+# v5-default per passbolt_api SlugDefinition::v5Default(): metadata name, username, uris, description,
+# icon, custom_fields; secret password, description, custom_fields. Updates rewrite these losslessly.
+_DEFAULT_METADATA_KEYS = frozenset(
+    {"object_type", "resource_type_id", "name", "username", "uris", "description", "icon", "custom_fields"}
+)
+_DEFAULT_SECRET_KEYS = frozenset({"object_type", "password", "description", "custom_fields"})
+_CUSTOM_FIELD_TYPES = frozenset({"text", "password", "boolean", "number", "uri"})
+MAX_URI_LENGTH = 1024
+MAX_CUSTOM_FIELDS = 128
 _ICON_TYPES = frozenset({"keepass-icon-set", "passbolt-icon-set"})
 _ICON_COLOR_RE = re.compile(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\Z")
 RESOURCE_METADATA_OBJECT_TYPE = "PASSBOLT_RESOURCE_METADATA"
@@ -424,6 +434,122 @@ def validate_v5_pin_code_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     if payload.get("icon") is not None:
         result["icon"] = _metadata_icon(payload["icon"])
     return result
+
+
+def _schema_custom_fields(
+    value: Any, *, key_field: str, value_field: str, error: str
+) -> list[dict[str, Any]]:
+    """Check v5 custom fields against the published schema and return them unchanged."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_CUSTOM_FIELDS:
+        raise ValueError(error)
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) - {"id", "type", key_field, value_field}:
+            raise ValueError(error)
+        identifier = item.get("id")
+        if not isinstance(identifier, str) or item.get("type") not in _CUSTOM_FIELD_TYPES:
+            raise ValueError(error)
+        try:
+            UUID(identifier)
+        except ValueError:
+            raise ValueError(error) from None
+        key = item.get(key_field)
+        if key is not None and (not isinstance(key, str) or len(key) > 255):
+            raise ValueError(error)
+        field_value = item.get(value_field)
+        if isinstance(field_value, float) and not math.isfinite(field_value):
+            raise ValueError(error)
+        if field_value is not None and not (
+            (isinstance(field_value, str) and len(field_value) <= 20_000)
+            or isinstance(field_value, bool | int | float)
+        ):
+            raise ValueError(error)
+        result.append(dict(item))
+    return result
+
+
+def _only_schema_keys(payload: Mapping[str, Any], allowed: frozenset[str]) -> bool:
+    return not any(value not in (None, "", []) for key, value in payload.items() if key not in allowed)
+
+
+def preserved_v5_default_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate existing v5-default metadata for a lossless rewrite.
+
+    Every uri (up to the documented 32), the icon and the metadata custom fields are kept
+    exactly as stored. Anything the v5-default schema does not allow fails closed instead
+    of being dropped, so an update can never silently lose vault data.
+    """
+    error = "Passbolt v5-default metadata has fields outside its schema; update refused"
+    if payload.get("object_type") != RESOURCE_METADATA_OBJECT_TYPE:
+        raise ValueError("Passbolt v5 metadata object_type is invalid")
+    if str(payload.get("resource_type_id") or "").lower() != V5_DEFAULT_RESOURCE_TYPE_ID:
+        raise ValueError("Passbolt v5 metadata resource_type_id is invalid")
+    if not _only_schema_keys(payload, _DEFAULT_METADATA_KEYS):
+        raise ValueError(error)
+    name, username, description = payload.get("name"), payload.get("username"), payload.get("description")
+    if not isinstance(name, str) or not name.strip() or len(name) > 255:
+        raise ValueError(error)
+    if username is not None and (not isinstance(username, str) or len(username) > 255):
+        raise ValueError(error)
+    if description is not None and (not isinstance(description, str) or len(description) > 10_000):
+        raise ValueError(error)
+    uris = payload.get("uris")
+    uris = [] if uris is None else uris
+    if not isinstance(uris, list) or len(uris) > MAX_READ_URIS:
+        raise ValueError(error)
+    if any(item is not None and (not isinstance(item, str) or len(item) > MAX_URI_LENGTH) for item in uris):
+        raise ValueError(error)
+    result: dict[str, Any] = {
+        "object_type": RESOURCE_METADATA_OBJECT_TYPE,
+        "resource_type_id": V5_DEFAULT_RESOURCE_TYPE_ID,
+        "name": name,
+        "username": username,
+        "uris": list(uris),
+        "description": description,
+    }
+    if payload.get("icon") is not None:
+        result["icon"] = _metadata_icon(payload["icon"])
+    result["custom_fields"] = _schema_custom_fields(
+        payload.get("custom_fields"), key_field="metadata_key", value_field="metadata_value", error=error
+    )
+    return result
+
+
+def preserved_v5_default_secret_fields(payload: Any) -> dict[str, Any]:
+    """Return the non-password parts of an existing v5-default secret, or fail closed.
+
+    The result never contains the existing password. Errors name no values.
+    """
+    error = "Passbolt v5-default secret has fields outside its schema; update refused"
+    if not isinstance(payload, Mapping) or not _only_schema_keys(payload, _DEFAULT_SECRET_KEYS):
+        raise ValueError(error)
+    if payload.get("object_type") not in (None, SECRET_DATA_OBJECT_TYPE):
+        raise ValueError(error)
+    description = payload.get("description")
+    if description is not None and (not isinstance(description, str) or len(description) > 50_000):
+        raise ValueError(error)
+    custom_fields = _schema_custom_fields(
+        payload.get("custom_fields"), key_field="secret_key", value_field="secret_value", error=error
+    )
+    return {"description": description, "custom_fields": custom_fields}
+
+
+def _replace_primary_uri(uris: list[Any], value: Any) -> list[Any]:
+    """``uri`` addresses the first (primary) uri only; the other uris are always kept.
+
+    A non-empty value replaces the primary uri (or adds one when there is none);
+    null or an empty string removes only the primary uri.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return list(uris[1:])
+    if not isinstance(value, str):
+        raise ValueError("uri must be a string")
+    uri = _https_url(value, "uri")
+    if len(uri) > MAX_URI_LENGTH:
+        raise ValueError(f"uri must be at most {MAX_URI_LENGTH} characters")
+    return [uri, *uris[1:]]
 
 
 class PassboltSinkDispatcher:
@@ -1660,18 +1786,35 @@ class PassboltAdapter:
                 }
             )
         else:
-            current = validate_v5_metadata(decrypted, strict_write=False)
-            current_uri = current["uris"][0] if current["uris"] else None
-            metadata = self._metadata(
-                name=_text(fields.get("name", current["name"]), "name", 255, required=True) or "",
-                uri=_https_url(str(fields.get("uri", current_uri)), "uri")
-                if fields.get("uri", current_uri)
-                else None,
-                username=_text(fields.get("username", current["username"]), "username", 255),
-                description=_text(fields.get("description"), "description", 10_000)
-                if "description" in fields
-                else current["description"],
-            )
+            # Lossless rewrite: only the requested fields change; all uris, the icon and custom
+            # fields are kept, and metadata outside the v5-default schema fails closed.
+            metadata = preserved_v5_default_metadata(decrypted)
+            if "name" in fields:
+                metadata["name"] = _text(fields["name"], "name", 255, required=True)
+            if "username" in fields:
+                metadata["username"] = _text(fields["username"], "username", 255)
+            if "description" in fields:
+                metadata["description"] = _text(fields["description"], "description", 10_000)
+            if "uri" in fields:
+                metadata["uris"] = _replace_primary_uri(metadata["uris"], fields["uri"])
+        secret_value: dict[str, Any] | None = None
+        sealed_path: Path | None = None
+        if "secret_source" in fields:
+            source = fields["secret_source"]
+            if not isinstance(source, Mapping):
+                raise ValueError("secret_source must be an object")
+            self.validate_secret_source(source)
+            # Only the password changes. The existing secret is decrypted inside server custody to
+            # keep its description and custom fields; a secret outside the schema fails closed here,
+            # before the new password is read and before any encryption or write.
+            kept = preserved_v5_default_secret_fields(await self._secret_payload(resource_id))
+            password, sealed_path = await asyncio.to_thread(self._secret_from_source, source)
+            secret_value = {
+                "object_type": SECRET_DATA_OBJECT_TYPE,
+                "password": password,
+                "description": kept["description"],
+                "custom_fields": kept["custom_fields"],
+            }
         metadata_key = await self._metadata_key()
         payload: dict[str, Any] = {
             "folder_parent_id": resource.get("folder_parent_id"),
@@ -1681,17 +1824,7 @@ class PassboltAdapter:
             "metadata": await self._encrypt_json(metadata, metadata_key["fingerprint"]),
             "resource_type_id": resource_type_id,
         }
-        if "secret_source" in fields:
-            source = fields["secret_source"]
-            if not isinstance(source, Mapping):
-                raise ValueError("secret_source must be an object")
-            password, sealed_path = await asyncio.to_thread(self._secret_from_source, source)
-            secret_value: dict[str, Any] = {
-                "object_type": SECRET_DATA_OBJECT_TYPE,
-                "password": password,
-                "description": None,
-                "custom_fields": [],
-            }
+        if secret_value is not None:
             payload["secrets"] = await self._encrypted_secrets_for_resource(resource, secret_value)
         result = _unwrap(
             await self._request(
@@ -1700,10 +1833,7 @@ class PassboltAdapter:
         )
         if not isinstance(result, dict):
             raise ProviderResponseError("Passbolt update resource response is invalid")
-        await asyncio.to_thread(
-            self._consume_sealed_ref,
-            sealed_path if "secret_source" in fields else None,
-        )
+        await asyncio.to_thread(self._consume_sealed_ref, sealed_path)
         return {"resource_id": _uuid(resource_id, "resource_id"), "updated": True}
 
     async def create_folder(

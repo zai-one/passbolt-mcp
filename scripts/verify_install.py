@@ -15,17 +15,25 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = "Passbolt"
 PACKAGE = "zai_passbolt"
 CHILD = """
-import runpy, socket, sys
+import os, runpy, socket, sys
+# The update check stays off in this gate: no GitHub request and no DNS lookup.
+os.environ['__DISABLE_ENV__'] = '1'
 original = socket.socket.connect
 def local_only(sock, address):
     if not isinstance(address, tuple) or address[0] not in {'127.0.0.1', '::1', 'localhost'}:
         raise RuntimeError('external network disabled in clean-install gate')
     return original(sock, address)
 socket.socket.connect = local_only
+original_lookup = socket.getaddrinfo
+def local_lookup(host, *args, **kwargs):
+    if host not in (None, '127.0.0.1', '::1', 'localhost', b'127.0.0.1', b'::1', b'localhost'):
+        raise socket.gaierror(socket.EAI_NONAME, 'external DNS disabled in clean-install gate')
+    return original_lookup(host, *args, **kwargs)
+socket.getaddrinfo = local_lookup
 package, config = sys.argv[1:]
 sys.argv = [package, '--config', config]
 runpy.run_module(package, run_name='__main__')
-"""
+""".replace("__DISABLE_ENV__", NAME.upper() + "_DISABLE_UPDATE_CHECK")
 SMOKE = """
 import asyncio, importlib, importlib.metadata, json, pathlib, sys
 from fastmcp import Client
@@ -63,6 +71,9 @@ async def check():
         assert result['provider_connectivity'] == result['destination_connectivity'] == 'not_checked'
         assert result['checks']['access_policy'] is True
         assert result['checks']['private_key_usable'] is False
+        # The served process has the update check switched off, so it never contacts GitHub.
+        update = (await client.call_tool(package.split('_')[-1] + '_check_update', {'force': True})).data
+        assert update['status'] == 'disabled' and update['source'] == 'none', update
         print(json.dumps({'version': expected_version, 'tools': sorted(tool.name for tool in tools)}))
 asyncio.run(check())
 """

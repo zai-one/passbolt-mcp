@@ -109,7 +109,10 @@ returns the current and latest versions, the release notes link and the matching
 (`git pull --ff-only && uv sync --frozen --extra standalone` for a checkout, `uv tool install --force ...` for a release package).
 When a newer version is already known from the cache, the server mentions it once in its startup
 instructions and in `passbolt_status`. Nothing is ever installed automatically. Offline, the check
-reports `status: unknown` and the server keeps working. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off.
+reports `status: unknown` and the server keeps working; after a failed request it waits 30 minutes before trying
+again, and a forced check runs at most once a minute. Only plain version tags such as `v1.2.3` are accepted.
+At startup the server itself makes this anonymous request to `api.github.com` at most once a day, also in HTTP
+deployments. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off, for example on servers without outbound internet access.
 
 ## Built by ZAI.ONE
 

@@ -21,6 +21,8 @@ from zai_passbolt.errors import SafeToolError
 from zai_passbolt.gpg_paths import gpg_path
 from zai_passbolt.transport import ProviderResponseError
 
+FIELD_ID = "6f1c2c3e-1b7a-4c55-9a0e-2f9d8c7b6a51"
+
 
 @pytest.fixture
 def gpg_directory():
@@ -168,11 +170,20 @@ async def test_password_update_approval_real_encryption_and_stale_revision(
         "name": "Synthetic account",
         "resource_type_id": "dd1f723d-0d1e-513f-8218-4055dc0530d0",
         "username": "fixture",
-        "uris": ["https://example.com"],
+        "uris": ["https://example.com", "https://other.example/login"],
         "description": None,
-        "custom_fields": [],
+        "icon": {"type": "keepass-icon-set", "value": 3},
+        "custom_fields": [{"id": FIELD_ID, "type": "text", "metadata_key": "PIN label"}],
     }
     encrypted_metadata = await adapter._encrypt_json(metadata, fingerprint)
+    old_password = "synthetic-old-password-must-not-survive"  # noqa: S105 -- negative fixture
+    existing_secret = {
+        "object_type": "PASSBOLT_SECRET_DATA",
+        "password": old_password,
+        "description": "synthetic secure note",
+        "custom_fields": [{"id": FIELD_ID, "type": "text", "secret_value": "synthetic field value"}],
+    }
+    encrypted_secret = await adapter._encrypt_json(existing_secret, fingerprint)
     resource = {
         "id": RESOURCE,
         "modified": "v1",
@@ -200,6 +211,9 @@ async def test_password_update_approval_real_encryption_and_stale_revision(
     dispatched = []
 
     async def request(method, path, **kwargs):
+        if method == "GET":
+            assert path == f"/secrets/resource/{RESOURCE}.json"
+            return {"body": {"data": encrypted_secret}}
         assert method == "PUT" and path == f"/resources/{RESOURCE}.json"
         dispatched.append(kwargs["payload"])
         return {"body": {"id": RESOURCE}}
@@ -222,8 +236,13 @@ async def test_password_update_approval_real_encryption_and_stale_revision(
     assert len(rows) == 1 and rows[0]["user_id"] == RESOURCE
     decrypted = await adapter._decrypt_json(rows[0]["data"], expected_signer=fingerprint)
     generated = decrypted["password"]
-    assert generated and decrypted["object_type"] == "PASSBOLT_SECRET_DATA"
-    assert generated not in json.dumps([prepared, result, dispatched]) + caplog.text
+    assert generated and generated != old_password and decrypted["object_type"] == "PASSBOLT_SECRET_DATA"
+    # Only the password changed: the secret note and secret custom fields survive the rotation.
+    assert decrypted == {**existing_secret, "password": generated}
+    assert await adapter._decrypt_json(dispatched[0]["metadata"], expected_signer=fingerprint) == metadata
+    visible = json.dumps([prepared, result, dispatched]) + caplog.text
+    for value in (generated, old_password, "synthetic secure note", "synthetic field value"):
+        assert value not in visible
     await call("passbolt_update_resource", **args, approval_id=approval)
     assert len(dispatched) == 1
     with pytest.raises(PermissionError, match="changed since confirmation"):

@@ -20,8 +20,14 @@ VAULT_READ_ONLY: dict[str, bool] = {
     "openWorldHint": True,
 }
 LOCAL_READ_ONLY: dict[str, bool] = {**VAULT_READ_ONLY, "openWorldHint": False}
-# Select only records a short-lived local selection; the vault is not changed.
-VAULT_SELECT: dict[str, bool] = {**VAULT_READ_ONLY, "idempotentHint": False}
+# Select does not change the vault, but it records a short-lived selection that authorises a later
+# passbolt_use_secret call, so it is not read-only. Nothing is deleted or overwritten.
+VAULT_SELECT: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
 # Writes require an idempotency_key; replays return the stored result.
 VAULT_CREATE: dict[str, bool] = {
     "readOnlyHint": False,

@@ -7,14 +7,28 @@
   refuses to deliver it.
 - `passbolt_update_resource` keeps the existing resource type and never converts one type into another. It reads the
   type from the resource's `resource_type_id` and refuses the update if the decrypted metadata names a different type.
-  `v5-default` updates are unchanged. `v5-pin-code` entries accept only `name` and `description`: the metadata is
+  `v5-pin-code` entries accept only `name` and `description`: the metadata is
   rebuilt in the v5-pin-code shape (name, description, icon kept), the PIN secret is not read, re-encrypted or sent,
   and `uri`, `username` and `secret_source` are refused because the generator produces passwords, not PINs.
   Every other or unknown type (TOTP, custom fields, notes, v4 types) is refused before any write.
+- `passbolt_update_resource` on `v5-default` entries no longer loses data. Previously the metadata was rebuilt with
+  only the first uri, no icon and empty custom fields, and a `secret_source` rotation dropped the secret's description
+  and custom fields. Now only the requested fields change: every uri, the icon and the metadata custom fields are kept
+  as stored; `uri` replaces only the first (primary) uri and keeps the others (`null` or `""` removes only the primary
+  uri). A password rotation decrypts the existing secret inside server custody and keeps its description and custom
+  fields; only the password changes, and nothing of the old secret is returned or logged. Metadata or a secret outside
+  the Passbolt `v5-default` schema (unknown properties, more than 32 uris, invalid icon or custom fields) is refused
+  before any encryption or write instead of being silently dropped.
+- Update check hardening: only plain version tags (`v1.2.3`) are accepted, so a malformed or hostile tag never reaches
+  results, update commands, the cache or server instructions; cached values are re-validated on read. Every GitHub
+  request attempt is recorded: after a failure no new request is made for 30 minutes, `force=true` is honoured at most
+  once a minute, and the startup refresh follows the same rules.
+- `passbolt_select` is annotated `readOnlyHint: false`: it records a selection that authorises a later
+  `passbolt_use_secret`. It remains non-destructive.
 - Search and select results carry `resource_type` (the Passbolt slug, or `unknown`) derived from `resource_type_id`.
 - Read mode accepts the documented 32 `uris` per v5 resource (writes stay limited to 10).
 - `passbolt_check_update`: suggests a newer GitHub release with its notes link and update command;
-  public API, 3 s timeout, 24 h cache, graceful offline, never auto-updates and never touches the vault.
+  anonymous public API, 3 s timeout, 24 h cache, graceful offline, never auto-updates and never touches the vault.
   A cached "update available" hint appears in server instructions and `passbolt_status`.
   Opt out with `PASSBOLT_DISABLE_UPDATE_CHECK=1`.
 - MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool.
