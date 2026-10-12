@@ -313,3 +313,49 @@ async def test_write_use_disabled_and_plaintext_source_rejected(config):
         )
     assert "do-not-log" not in str(error.value)
     assert b"do-not-log" not in config.state_path.read_bytes()
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://evil.example/login",
+        "https://example.com.evil.example/login",
+        "https://example.com:8443/login",
+        "http://example.com/login",
+        7,
+    ],
+)
+async def test_update_refuses_off_policy_uri_before_approval_or_adapter(config, uri):
+    adapter = FixtureAdapter()
+    runtime, call = harness(config, adapter)
+    args = dict(
+        resource_id=RESOURCE,
+        fields={"uri": uri, "secret_source": {"kind": "server_generated"}},
+        expected_modified="v1",
+        idempotency_key="u-off-policy",
+    )
+    with pytest.raises(SafeToolError) as error:
+        await call("passbolt_update_resource", **args)
+    assert "provider_disabled" in str(error.value) and "evil" not in str(error.value)
+    # The adapter is never entered: no secret-source read, decryption, encryption or PUT.
+    assert adapter.calls == []
+    # Nothing was prepared, so no approval can later unlock this request.
+    assert await runtime.store.provider_write_lookup("alice", "passbolt", "u-off-policy") is None
+
+
+@pytest.mark.parametrize("uri", ["https://other.example/login", "https://EXAMPLE.com:443/x", None, ""])
+async def test_update_accepts_policy_uri_or_primary_uri_removal(config, uri):
+    adapter = FixtureAdapter()
+    runtime, call = harness(config, adapter)
+    args = dict(
+        resource_id=RESOURCE,
+        fields={"uri": uri, "secret_source": {"kind": "server_generated"}},
+        expected_modified="v1",
+        idempotency_key="u-on-policy",
+    )
+    prepared = await call("passbolt_update_resource", **args)
+    assert prepared["confirmation_required"] and not adapter.calls
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_update_resource", **args, approval_id=approval))["updated"]
+    [(kind, kwargs)] = adapter.calls
+    assert kind == "update" and kwargs["fields"]["uri"] == uri

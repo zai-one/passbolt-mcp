@@ -1101,3 +1101,19 @@ def test_world_readable_sink_registry_fails_closed(tmp_path: Path) -> None:
     registry.chmod(0o644)
 
     assert PassboltSinkDispatcher(registry).ready() is False
+
+
+async def test_create_rejects_uri_longer_than_the_v5_schema_before_any_request() -> None:
+    adapter = PassboltAdapter("https://passbolt.example", "fixture-token")
+
+    async def no_request(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("no request may be made")
+
+    adapter._request = no_request  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match="at most 1024"):
+        await adapter.create_resource(
+            name="Long",
+            uri="https://example.com/" + "x" * 1100,
+            username="operator",
+            secret_source={"kind": "server_generated"},
+        )

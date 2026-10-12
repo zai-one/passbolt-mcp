@@ -19,6 +19,10 @@
   fields; only the password changes, and nothing of the old secret is returned or logged. Metadata or a secret outside
   the Passbolt `v5-default` schema (unknown properties, more than 32 uris, invalid icon or custom fields) is refused
   before any encryption or write instead of being silently dropped.
+- `passbolt_update_resource` checks a new `uri` against the same domain policy as `passbolt_create_resource` and
+  refuses an off-policy uri before any approval, secret-source read, decryption, encryption or write. Removing the
+  primary uri (`null` or `""`) needs no domain check. New uris on create and update are limited to the 1024 characters
+  of the Passbolt v5 schema.
 - Update check hardening: only plain version tags (`v1.2.3`) are accepted, so a malformed or hostile tag never reaches
   results, update commands, the cache or server instructions; cached values are re-validated on read. Every GitHub
   request attempt is recorded: after a failure no new request is made for 30 minutes, `force=true` is honoured at most

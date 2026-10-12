@@ -546,10 +546,15 @@ def _replace_primary_uri(uris: list[Any], value: Any) -> list[Any]:
         return list(uris[1:])
     if not isinstance(value, str):
         raise ValueError("uri must be a string")
+    return [_new_uri(value), *uris[1:]]
+
+
+def _new_uri(value: str) -> str:
+    """Validate a uri written by this server: HTTPS, no credentials, within the v5 schema length."""
     uri = _https_url(value, "uri")
     if len(uri) > MAX_URI_LENGTH:
         raise ValueError(f"uri must be at most {MAX_URI_LENGTH} characters")
-    return [uri, *uris[1:]]
+    return uri
 
 
 class PassboltSinkDispatcher:
@@ -1698,7 +1703,7 @@ class PassboltAdapter:
             return {"resource_id": resource_id, "created": True}
         metadata = self._metadata(
             name=_text(name, "name", 255, required=True) or "",
-            uri=_https_url(uri, "uri"),
+            uri=_new_uri(uri),
             username=_text(username, "username", 255),
             description=_text(description, "description", 10_000),
         )
