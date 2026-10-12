@@ -22,6 +22,7 @@ from urllib.parse import quote, urlsplit
 from uuid import UUID, uuid4
 
 from zai_passbolt.gpg_paths import gpg_path
+from zai_passbolt.readiness import log_probe_failure, probe_reason, probe_step, readiness_trace
 from zai_passbolt.transport import (
     JsonHttpClient,
     ProviderAuthenticationError,
@@ -702,6 +703,7 @@ class PassboltAdapter:
 
     def _writable_gpg_home(self) -> Path:
         if not self._decryption_configured() or self.gpg_home is None:
+            probe_reason("gpg_runtime_unavailable")
             raise ProviderResponseError("Passbolt GPG custody is not configured")
         if self._runtime_gpg_home is None:
             target = Path(tempfile.mkdtemp(prefix="mcp-passbolt-gnupg-"))
@@ -715,6 +717,7 @@ class PassboltAdapter:
                 target.chmod(0o700)
             except OSError:
                 shutil.rmtree(target, ignore_errors=True)
+                probe_reason("gpg_runtime_unavailable")
                 raise ProviderResponseError("Passbolt private GPG runtime could not be prepared") from None
             self._runtime_gpg_home = target
         return self._runtime_gpg_home
@@ -751,6 +754,7 @@ class PassboltAdapter:
     ) -> str:
         gpg = shutil.which("gpg")
         if not gpg:
+            probe_reason("gpg_unavailable")
             raise ProviderResponseError("Passbolt GPG custody is not configured")
         command = [
             gpg,
@@ -780,8 +784,10 @@ class PassboltAdapter:
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            probe_reason("gpg_operation_failed")
             raise ProviderResponseError("Passbolt GPG operation failed") from exc
         if result.returncode != 0:
+            probe_reason("gpg_operation_failed")
             raise ProviderResponseError("Passbolt GPG operation failed")
         if expected_signer:
             expected = expected_signer.replace(" ", "").upper()
@@ -792,6 +798,7 @@ class PassboltAdapter:
                 for line in status_lines.splitlines()
                 if len(line.split()) >= 3
             ):
+                probe_reason("gpg_signer_mismatch")
                 raise ProviderResponseError("Passbolt GPG signer verification failed")
         return result.stdout
 
@@ -819,6 +826,7 @@ class PassboltAdapter:
             # than the v5 secret object. Keep it in memory only.
             return {"password": plaintext}
         if not isinstance(value, dict):
+            probe_reason("decrypted_payload_invalid")
             raise ProviderResponseError("Passbolt decrypted payload is invalid")
         return value
 
@@ -1073,105 +1081,81 @@ class PassboltAdapter:
             )
 
     async def status(self) -> dict[str, bool]:
-        auth_ready = False
-        decrypt_ready = False
-        resources: Sequence[Any] = []
-        if not self._configured():
-            # Silence here is indistinguishable from a live outage: the tool
-            # still answers provider_enabled=true with both flags false.
-            logger.warning(
-                "Passbolt readiness probe skipped: server custody is not configured",
-                extra={"provider": "passbolt", "operation": "status", "error_code": "custody_not_configured"},
-            )
-        if self._configured():
+        result = {"provider_enabled": True, "auth_ready": False, "decrypt_ready": False}
+        with readiness_trace() as trace:
+            if not self._configured():
+                log_probe_failure(logger, "custody_not_configured", trace)
+                return result
             try:
+                probe_step("resource_fetch", "provider_error")
                 payload = await self._request("GET", "/resources.json", params={"limit": 5})
+                probe_step("resource_shape", "invalid_response")
                 body = _unwrap(payload)
-                auth_ready = isinstance(body, (list, dict))
                 candidate = (
                     body
                     if isinstance(body, list)
                     else body.get("resources", body.get("data", []))
                     if isinstance(body, dict)
-                    else []
+                    else None
                 )
-                resources = candidate if isinstance(candidate, list) else []
-                auth_ready = isinstance(candidate, list)
-            except ProviderError as exc:
-                # Safe with any embedding application's formatter: never attach
-                # exception objects, tracebacks or provider response text.
-                logger.warning(
-                    "Passbolt auth probe failed",
-                    extra={
-                        "provider": "passbolt",
-                        "operation": "status",
-                        "error_code": "auth_probe_failed",
-                        "exception_type": type(exc).__name__,
-                    },
-                )
-                auth_ready = False
-            if auth_ready:
-                encrypted = next(
+                if not isinstance(candidate, list):
+                    log_probe_failure(logger, "auth_probe_failed", trace)
+                    return result
+                result["auth_ready"] = True
+            except (ProviderError, OSError, ValueError, TypeError):
+                log_probe_failure(logger, "auth_probe_failed", trace)
+                return result
+
+            probe_step("canary_select", "no_resources")
+            if not candidate:
+                log_probe_failure(logger, "decrypt_canary_failed", trace)
+                return result
+            # Preserve the original bounded canary selection; do not try other resources
+            # after a failure, which could conceal a broken key or consume extra quota.
+            encrypted = next(
+                (
+                    item.get("metadata")
+                    for item in candidate[:5]
+                    if isinstance(item, dict) and isinstance(item.get("metadata"), str)
+                ),
+                None,
+            )
+            resource = (
+                next(
                     (
-                        item.get("metadata")
-                        for item in resources[:5]
-                        if isinstance(item, dict) and isinstance(item.get("metadata"), str)
+                        item
+                        for item in candidate[:5]
+                        if isinstance(item, dict) and item.get("metadata") == encrypted
                     ),
-                    None,
+                    {},
                 )
+                if encrypted
+                else candidate[0]
+            )
+            try:
                 if encrypted:
-                    try:
-                        resource = next(
-                            (
-                                item
-                                for item in resources[:5]
-                                if isinstance(item, dict) and item.get("metadata") == encrypted
-                            ),
-                            {},
-                        )
-                        key_id = resource.get("metadata_key_id") if isinstance(resource, dict) else None
-                        key_type = resource.get("metadata_key_type") if isinstance(resource, dict) else None
-                        if key_type != "user_key":
-                            await self._metadata_key(str(key_id) if key_id else None)
-                        validate_v5_metadata(await self._decrypt_json(encrypted), strict_write=False)
-                        resource_id = resource.get("id") if isinstance(resource, dict) else None
-                        if resource_id:
-                            secret = await self._secret_payload(str(resource_id))
-                            decrypt_ready = bool(secret)
-                    except ProviderError as exc:
-                        logger.warning(
-                            "Passbolt decrypt canary failed",
-                            extra={
-                                "provider": "passbolt",
-                                "operation": "status",
-                                "error_code": "decrypt_canary_failed",
-                                "exception_type": type(exc).__name__,
-                            },
-                        )
-                        decrypt_ready = False
-                elif resources:
-                    resource = resources[0]
-                    resource_id = resource.get("id") if isinstance(resource, dict) else None
-                    if resource_id:
-                        try:
-                            secret = await self._secret_payload(str(resource_id))
-                            decrypt_ready = bool(secret)
-                        except ProviderError as exc:
-                            logger.warning(
-                                "Passbolt decrypt canary failed",
-                                extra={
-                                    "provider": "passbolt",
-                                    "operation": "status",
-                                    "error_code": "decrypt_canary_failed",
-                                    "exception_type": type(exc).__name__,
-                                },
-                            )
-                            decrypt_ready = False
-        return {
-            "provider_enabled": True,
-            "auth_ready": auth_ready,
-            "decrypt_ready": decrypt_ready,
-        }
+                    key_id = resource.get("metadata_key_id")
+                    if resource.get("metadata_key_type") != "user_key":
+                        probe_step("metadata_key_fetch", "provider_error")
+                        await self._metadata_key(str(key_id) if key_id else None)
+                    probe_step("metadata_decrypt", "provider_error")
+                    metadata = await self._decrypt_json(encrypted)
+                    probe_step("metadata_validate", "invalid_metadata")
+                    validate_v5_metadata(metadata, strict_write=False)
+                probe_step("canary_select", "resource_id_missing")
+                resource_id = resource.get("id") if isinstance(resource, dict) else None
+                if not resource_id:
+                    log_probe_failure(logger, "decrypt_canary_failed", trace)
+                    return result
+                probe_step("secret_fetch", "provider_error")
+                secret = await self._secret_payload(str(resource_id))
+                result["decrypt_ready"] = bool(secret)
+                if not secret:
+                    probe_step("secret_validate", "empty_secret")
+                    log_probe_failure(logger, "decrypt_canary_failed", trace)
+            except (ProviderError, OSError, ValueError, TypeError):
+                log_probe_failure(logger, "decrypt_canary_failed", trace)
+        return result
 
     @staticmethod
     def validate_search(query: str, target_url: str | None, limit: int) -> tuple[str, str | None, int]:
@@ -1397,9 +1381,11 @@ class PassboltAdapter:
     async def _load_metadata_keys(self) -> None:
         if self._metadata_keys_loaded:
             return
+        probe_step("metadata_key_fetch", "provider_error")
         payload = await self._request(
             "GET", "/metadata/keys.json", params={"contain[metadata_private_keys]": 1}
         )
+        probe_step("metadata_key_envelope", "invalid_response")
         body = _unwrap(payload)
         if not isinstance(body, list):
             raise ProviderResponseError("Passbolt metadata keys response is invalid")
@@ -1427,7 +1413,9 @@ class PassboltAdapter:
                 )
                 if own is None:
                     continue
+                probe_step("metadata_key_decrypt", "provider_error")
                 plaintext = await self._decrypt_text(str(own["data"]), expected_signer=self.user_fingerprint)
+                probe_step("metadata_key_envelope", "invalid_envelope")
                 try:
                     private_data = json.loads(plaintext)
                 except json.JSONDecodeError as exc:
@@ -1438,18 +1426,28 @@ class PassboltAdapter:
                 actual_fingerprint = str(private_data.get("fingerprint", "")).replace(" ", "").upper()
                 domain = str(private_data.get("domain", "")).rstrip("/")
                 private_armored = private_data.get("armored_key")
-                if (
-                    private_data.get("object_type") != METADATA_PRIVATE_KEY_OBJECT_TYPE
-                    or domain != self.base_url
-                    or actual_fingerprint != expected_fingerprint
-                    or expected_fingerprint not in self._metadata_fingerprints
-                    or private_data.get("passphrase") not in {None, ""}
-                    or not isinstance(private_armored, str)
-                    or "PRIVATE KEY BLOCK" not in private_armored
-                ):
-                    raise ProviderResponseError("Passbolt metadata private key trust verification failed")
+                checks = (
+                    (
+                        private_data.get("object_type") == METADATA_PRIVATE_KEY_OBJECT_TYPE,
+                        "object_type_mismatch",
+                    ),
+                    (domain == self.base_url, "domain_mismatch"),
+                    (actual_fingerprint == expected_fingerprint, "fingerprint_mismatch"),
+                    (expected_fingerprint in self._metadata_fingerprints, "fingerprint_not_pinned"),
+                    (private_data.get("passphrase") in (None, ""), "embedded_passphrase"),
+                    (
+                        isinstance(private_armored, str) and "PRIVATE KEY BLOCK" in private_armored,
+                        "private_key_missing",
+                    ),
+                )
+                for valid, reason in checks:
+                    if not valid:
+                        probe_step("metadata_key_trust", reason)
+                        raise ProviderResponseError("Passbolt metadata private key trust verification failed")
+                probe_step("metadata_key_import", "provider_error")
                 await self._gpg(["--import"], stdin=private_armored)
                 fingerprints = await self._gpg(["--with-colons", "--fingerprint", expected_fingerprint])
+                probe_step("metadata_key_import", "import_fingerprint_mismatch")
                 if expected_fingerprint not in fingerprints.replace(":", "").upper():
                     raise ProviderResponseError("Passbolt imported metadata key fingerprint does not match")
                 normalized_id = str(key_id)
@@ -1458,16 +1456,19 @@ class PassboltAdapter:
                     "fingerprint": expected_fingerprint,
                 }
                 if not item.get("expired"):
+                    probe_step("metadata_key_select", "multiple_active_keys")
                     if self._active_metadata_key_id is not None:
                         raise ProviderResponseError("Passbolt has multiple active metadata keys")
                     self._active_metadata_key_id = normalized_id
         self._metadata_keys_loaded = True
+        probe_step("metadata_key_select", "metadata_private_keys_unavailable")
         if not self._metadata_key_cache:
             raise ProviderResponseError("Passbolt metadata private keys are unavailable")
 
     async def _metadata_key(self, key_id: str | None = None) -> dict[str, str]:
         await self._load_metadata_keys()
         selected = key_id or self._active_metadata_key_id
+        probe_step("metadata_key_select", "requested_metadata_key_unavailable")
         if selected is None or selected not in self._metadata_key_cache:
             raise ProviderResponseError("Passbolt requested metadata key is unavailable")
         return dict(self._metadata_key_cache[selected])
@@ -1914,6 +1915,7 @@ class PassboltAdapter:
         return {"shared": True}
 
     async def _secret_payload(self, resource_id: str) -> dict[str, Any]:
+        probe_step("secret_fetch", "provider_error")
         response = await self._request(
             "GET", f"/secrets/resource/{quote(_uuid(resource_id, 'resource_id'))}.json"
         )
@@ -1921,8 +1923,10 @@ class PassboltAdapter:
         encrypted = body.get("data") if isinstance(body, dict) else None
         if not encrypted and isinstance(body, dict) and isinstance(body.get("secret"), dict):
             encrypted = body["secret"].get("data")
+        probe_step("secret_fetch", "secret_payload_missing")
         if not isinstance(encrypted, str) or not encrypted:
             raise ProviderResponseError("Passbolt encrypted secret payload is unavailable")
+        probe_step("secret_decrypt", "provider_error")
         return await self._decrypt_json(encrypted)
 
     async def use_secret(

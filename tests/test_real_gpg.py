@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from test_product_tools import PROBE, SECRET, URL, probe_transport  # noqa: F401
-from test_runtime import RESOURCE, harness
+from test_runtime import RESOURCE, approve, harness
 
 from zai_passbolt.adapter import PassboltAdapter, PassboltSinkDispatcher
 from zai_passbolt.doctor import diagnose
@@ -130,6 +130,105 @@ async def test_corrupt_ciphertext_and_wrong_passphrase_fail_closed(real_gpg, tmp
     assert "synthetic-payload" not in str(failure.value)
 
 
+async def test_status_real_gpg_failure_has_safe_stage(real_gpg, monkeypatch, caplog):
+    adapter, _, _ = real_gpg
+
+    async def request(method, path, **kwargs):
+        assert method == "GET" and path == "/resources.json"
+        return {
+            "body": [
+                {"id": RESOURCE, "metadata_key_type": "user_key", "metadata": "corrupt synthetic ciphertext"}
+            ]
+        }
+
+    monkeypatch.setattr(adapter, "_request", request)
+    assert await adapter.status() == {
+        "provider_enabled": True,
+        "auth_ready": True,
+        "decrypt_ready": False,
+    }
+    record = caplog.records[-1]
+    assert record.probe_stage == "metadata_decrypt"
+    assert record.probe_reason == "gpg_operation_failed"
+    assert "corrupt synthetic ciphertext" not in repr(record.__dict__)
+    assert record.exc_info is None
+
+
+async def test_password_update_approval_real_encryption_and_stale_revision(
+    real_gpg,
+    config,
+    monkeypatch,
+    caplog,
+):
+    adapter, fingerprint, _ = real_gpg
+    attach_policy(adapter, config)
+    public = await adapter._gpg(["--armor", "--export", fingerprint])
+    metadata = {
+        "object_type": "PASSBOLT_RESOURCE_METADATA",
+        "name": "Synthetic account",
+        "resource_type_id": "dd1f723d-0d1e-513f-8218-4055dc0530d0",
+        "username": "fixture",
+        "uris": ["https://example.com"],
+        "description": None,
+        "custom_fields": [],
+    }
+    encrypted_metadata = await adapter._encrypt_json(metadata, fingerprint)
+    resource = {
+        "id": RESOURCE,
+        "modified": "v1",
+        "metadata": encrypted_metadata,
+        "metadata_key_type": "user_key",
+        "permissions": [],
+    }
+    monkeypatch.setattr(adapter, "_resource", AsyncMock(return_value=resource))
+    monkeypatch.setattr(
+        adapter, "_metadata_key", AsyncMock(return_value={"id": "key", "fingerprint": fingerprint})
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_directory",
+        AsyncMock(
+            return_value=(
+                [],
+                [
+                    {"id": RESOURCE, "gpgkey": {"fingerprint": fingerprint, "armored_key": public}},
+                ],
+            )
+        ),
+    )
+    dispatched = []
+
+    async def request(method, path, **kwargs):
+        assert method == "PUT" and path == f"/resources/{RESOURCE}.json"
+        dispatched.append(kwargs["payload"])
+        return {"body": {"id": RESOURCE}}
+
+    monkeypatch.setattr(adapter, "_request", request)
+    runtime, call = harness(config, adapter)
+    args = {
+        "resource_id": RESOURCE,
+        "fields": {"secret_source": {"kind": "server_generated"}},
+        "expected_modified": "v1",
+        "idempotency_key": "password-update",
+    }
+    prepared = await call("passbolt_update_resource", **args)
+    assert prepared["confirmation_required"] and not dispatched
+    approval = await approve(runtime, prepared)
+    result = await call("passbolt_update_resource", **args, approval_id=approval)
+    assert result["updated"] and len(dispatched) == 1
+    rows = dispatched[0]["secrets"]
+    assert len(rows) == 1 and rows[0]["user_id"] == RESOURCE
+    decrypted = await adapter._decrypt_json(rows[0]["data"], expected_signer=fingerprint)
+    generated = decrypted["password"]
+    assert generated and decrypted["object_type"] == "PASSBOLT_SECRET_DATA"
+    assert generated not in json.dumps([prepared, result, dispatched]) + caplog.text
+    await call("passbolt_update_resource", **args, approval_id=approval)
+    assert len(dispatched) == 1
+    with pytest.raises(PermissionError, match="changed since confirmation"):
+        await adapter.update_resource(resource_id=RESOURCE, fields=args["fields"], expected_modified="stale")
+    assert len(dispatched) == 1
+
+
 async def test_active_keyring_uses_private_agent_and_cleanup(real_gpg):
     adapter, fingerprint, _ = real_gpg
     runtime = adapter._writable_gpg_home()
@@ -164,7 +263,12 @@ async def test_real_gpg_doctor_success_and_missing_server_key(real_gpg, config):
 
 
 async def test_real_decrypt_selection_probe_replay_and_no_plaintext(
-    real_gpg, config, monkeypatch, probe_transport, capsys, caplog  # noqa: F811
+    real_gpg,
+    config,
+    monkeypatch,
+    probe_transport,  # noqa: F811
+    capsys,
+    caplog,  # noqa: F811
 ):
     adapter, fingerprint, _ = real_gpg
     attach_policy(adapter, config)
