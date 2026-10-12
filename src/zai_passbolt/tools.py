@@ -20,8 +20,14 @@ VAULT_READ_ONLY: dict[str, bool] = {
     "openWorldHint": True,
 }
 LOCAL_READ_ONLY: dict[str, bool] = {**VAULT_READ_ONLY, "openWorldHint": False}
-# Select only records a short-lived local selection; the vault is not changed.
-VAULT_SELECT: dict[str, bool] = {**VAULT_READ_ONLY, "idempotentHint": False}
+# Select does not change the vault, but it records a short-lived selection that authorises a later
+# passbolt_use_secret call, so it is not read-only. Nothing is deleted or overwritten.
+VAULT_SELECT: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
 # Writes require an idempotency_key; replays return the stored result.
 VAULT_CREATE: dict[str, bool] = {
     "readOnlyHint": False,
@@ -691,9 +697,15 @@ def register_tools(server: Any, runtime: Any) -> None:
         if not settings.passbolt_write_enabled:
             await _passbolt_audit("passbolt:write", "update_resource", "disabled", resource_id=resource_id)
             raise PermissionError("Passbolt write runtime is not enabled")
-        adapter, _policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
+        adapter, policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
         if resources is not None and resource_id not in resources:
             raise PermissionError("Passbolt resource policy denied")
+        # A new uri must pass the same domain policy as passbolt_create_resource, before any approval,
+        # secret-source read, decryption, encryption or write. null/"" only removes the primary uri.
+        new_uri = fields.get("uri") if isinstance(fields, dict) else None
+        removes_uri = new_uri is None or (isinstance(new_uri, str) and not new_uri.strip())
+        if not removes_uri and not (isinstance(new_uri, str) and policy.permits_domain(new_uri)):
+            raise PermissionError("Passbolt update resource policy denied")
         arguments = {
             "resource_id": resource_id,
             "fields": fields,
