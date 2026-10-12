@@ -15,7 +15,13 @@ from zai_passbolt import __version__
 from zai_passbolt.config import ServiceConfig
 from zai_passbolt.onboarding import check_config, load_config
 from zai_passbolt.runtime import Runtime
-from zai_passbolt.tools import register_tools
+from zai_passbolt.tools import register_tools, update_cache_path
+from zai_passbolt.update_check import refresh_in_background, startup_hint
+
+SERVER_INSTRUCTIONS = (
+    "Passbolt vault access without returning passwords. Search and select use metadata only; "
+    "secrets are delivered to operator-registered sinks, never to the conversation."
+)
 
 
 class ToolRegistrar:
@@ -69,8 +75,14 @@ def create_server(
         finally:
             runtime.close()
 
+    hint = startup_hint(update_cache_path(config))
     server = FastMCP(
-        "Passbolt MCP", version=__version__, auth=auth, mask_error_details=True, lifespan=lifespan
+        "Passbolt MCP",
+        version=__version__,
+        auth=auth,
+        mask_error_details=True,
+        lifespan=lifespan,
+        instructions=SERVER_INSTRUCTIONS + (f" {hint}" if hint else ""),
     )
     registrar = ToolRegistrar(server, runtime)
     register_tools(registrar, runtime)
@@ -95,6 +107,8 @@ def main() -> None:
             print(json.dumps(result, sort_keys=True))
             parser.exit(0 if result["ready"] else 2)
         server = create_server(config, transport=args.transport)
+        # Refresh the cached update hint for the next start; never blocks startup.
+        refresh_in_background(update_cache_path(config))
     except (ValueError, OSError) as exc:
         parser.exit(2, f"configuration error: {type(exc).__name__}; check credential and policy files\n")
     if args.transport == "http":

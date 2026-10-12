@@ -730,13 +730,24 @@ class UpdateAdapter(PassboltAdapter):
         assert resource_id == "44444444-4444-4444-8444-444444444444"
         return {
             "id": resource_id,
-            "name": "Existing",
-            "uri": "https://example.com/login",
-            "username": "old-user",
-            "description": "preserve-me",
+            "resource_type_id": "dd1f723d-0d1e-513f-8218-4055dc0530d0",
+            "metadata": "existing-metadata",
+            "metadata_key_type": "user_key",
             "modified": "2026-07-21T00:00:00Z",
             "folder_parent_id": None,
             "expired": None,
+        }
+
+    async def _decrypt_json(self, armored: str, *, expected_signer: str | None = None) -> dict[str, Any]:
+        assert armored == "existing-metadata"
+        return {
+            "object_type": "PASSBOLT_RESOURCE_METADATA",
+            "resource_type_id": "dd1f723d-0d1e-513f-8218-4055dc0530d0",
+            "name": "Existing",
+            "username": "old-user",
+            "uris": ["https://example.com/login"],
+            "description": "preserve-me",
+            "custom_fields": [],
         }
 
     async def _metadata_key(self, key_id: str | None = None) -> dict[str, str]:
@@ -771,7 +782,9 @@ async def test_metadata_only_update_preserves_existing_description() -> None:
     assert adapter.metadata_plaintext is not None
     assert adapter.metadata_plaintext["description"] == "preserve-me"
     assert adapter.metadata_plaintext["username"] == "new-user"
+    assert adapter.metadata_plaintext["uris"] == ["https://example.com/login"]
     assert adapter.update_payload is not None
+    assert adapter.update_payload["resource_type_id"] == "dd1f723d-0d1e-513f-8218-4055dc0530d0"
     assert "secrets" not in adapter.update_payload
 
 

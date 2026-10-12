@@ -119,7 +119,7 @@ def main():
         cwd = work / "unrelated"
         cwd.mkdir(mode=0o700)
         prefix = NAME.upper()
-        env = {prefix + "_STATE_PATH": "state/service.sqlite"}
+        env = {prefix + "_STATE_PATH": "state/service.sqlite", prefix + "_DISABLE_UPDATE_CHECK": "1"}
         token = private(cwd / "synthetic.token", "synthetic-install-gate-token")
         if NAME == "Keysso":
             env["KEYSSO_API_TOKEN_FILE"] = token

@@ -7,8 +7,40 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+from zai_passbolt import update_check
 from zai_passbolt.adapter import PassboltAccessPolicy, PassboltAdapter
 from zai_passbolt.transport import LocalPreDispatchDenied, ProviderError, ProviderHttpError, request_hash
+
+# MCP tool annotations are client hints only; scopes, policies, approvals and
+# idempotency keys remain the enforcement.
+VAULT_READ_ONLY: dict[str, bool] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+LOCAL_READ_ONLY: dict[str, bool] = {**VAULT_READ_ONLY, "openWorldHint": False}
+# Select only records a short-lived local selection; the vault is not changed.
+VAULT_SELECT: dict[str, bool] = {**VAULT_READ_ONLY, "idempotentHint": False}
+# Writes require an idempotency_key; replays return the stored result.
+VAULT_CREATE: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+VAULT_CHANGE: dict[str, bool] = {**VAULT_CREATE, "destructiveHint": True}
+# Delivers a secret to an operator sink (possibly an HTTPS probe); selections are single-use.
+SECRET_USE: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
+
+
+def update_cache_path(settings: Any) -> Any:
+    return settings.state_path.parent / "update-check.json"
 
 
 def register_tools(server: Any, runtime: Any) -> None:
@@ -19,7 +51,7 @@ def register_tools(server: Any, runtime: Any) -> None:
     PassboltSelectionRecord = runtime.PassboltSelectionRecord
     PassboltAuditRecord = runtime.PassboltAuditRecord
 
-    @server.tool(auth=require_scopes("passbolt:read"))
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=LOCAL_READ_ONLY)
     async def passbolt_local_diagnostics() -> dict[str, Any]:
         """Check this binding's local key usability and policy, without vault or destination requests."""
         from zai_passbolt.doctor import diagnose
@@ -415,7 +447,7 @@ def register_tools(server: Any, runtime: Any) -> None:
             raise PermissionError("Passbolt approval was already consumed")
         return await execute()
 
-    @server.tool(auth=require_scopes("passbolt:read"))
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_status() -> dict[str, Any]:
         """Probe real Passbolt auth and a bounded v5 decrypt canary without returning secrets."""
         records = await store.provider_records()
@@ -436,10 +468,26 @@ def register_tools(server: Any, runtime: Any) -> None:
             await _passbolt_audit("passbolt:read", "status", "error")
             raise
         result["provider_enabled"] = True
+        # Cache-only hint: the status probe never contacts GitHub.
+        known = update_check.cached_status(update_cache_path(settings))
+        if known and known["update_available"]:
+            result["update"] = {
+                key: known[key]
+                for key in ("current_version", "latest_version", "release_notes_url", "update_command")
+            }
         await _passbolt_audit("passbolt:read", "status", "success")
         return result
 
-    @server.tool(auth=require_scopes("passbolt:read"))
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
+    async def passbolt_check_update(force: bool = False) -> dict[str, Any]:
+        """Check whether a newer Passbolt MCP release exists on GitHub. Suggests, never installs.
+
+        Uses the public GitHub API with a short timeout and a 24h cache; never contacts the vault.
+        Set PASSBOLT_DISABLE_UPDATE_CHECK=1 to turn it off.
+        """
+        return await update_check.check_for_update(update_cache_path(settings), force=force)
+
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_search(query: str, target_url: str | None = None, limit: int = 20) -> dict[str, Any]:
         """Search only v5 metadata decrypted inside server custody."""
         adapter, policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
@@ -460,7 +508,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         await _passbolt_audit("passbolt:read", "search", "success")
         return result
 
-    @server.tool(auth=require_scopes("passbolt:read"))
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_SELECT)
     async def passbolt_select(target_url: str, query: str = "", limit: int = 10) -> dict[str, Any]:
         """Bind a safe metadata selection to this principal and exact target URL."""
         adapter, policy, resources, _folders, vault_profile = await _passbolt_access_policy()
@@ -513,7 +561,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return public
 
-    @server.tool(auth=require_scopes("passbolt:write"))
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CREATE)
     async def passbolt_create_resource(
         name: str,
         uri: str,
@@ -631,7 +679,7 @@ def register_tools(server: Any, runtime: Any) -> None:
             await _passbolt_audit("passbolt:write", "sealed_ref_consumed", "success", resource_id=resource_id)
         return result
 
-    @server.tool(auth=require_scopes("passbolt:write"))
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
     async def passbolt_update_resource(
         resource_id: str,
         fields: dict[str, Any],
@@ -675,7 +723,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return result
 
-    @server.tool(auth=require_scopes("passbolt:write"))
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CREATE)
     async def passbolt_create_folder(
         name: str,
         idempotency_key: str,
@@ -752,7 +800,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return result
 
-    @server.tool(auth=require_scopes("passbolt:write"))
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
     async def passbolt_share_resource(
         resource_id: str,
         permission: str,
@@ -809,7 +857,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return result
 
-    @server.tool(auth=require_scopes("passbolt:use"))
+    @server.tool(auth=require_scopes("passbolt:use"), annotations=SECRET_USE)
     async def passbolt_use_secret(
         selection_id: str,
         sink_ref: str,
