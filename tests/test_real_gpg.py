@@ -176,6 +176,7 @@ async def test_password_update_approval_real_encryption_and_stale_revision(
     resource = {
         "id": RESOURCE,
         "modified": "v1",
+        "resource_type_id": "dd1f723d-0d1e-513f-8218-4055dc0530d0",
         "metadata": encrypted_metadata,
         "metadata_key_type": "user_key",
         "permissions": [],
@@ -216,6 +217,7 @@ async def test_password_update_approval_real_encryption_and_stale_revision(
     approval = await approve(runtime, prepared)
     result = await call("passbolt_update_resource", **args, approval_id=approval)
     assert result["updated"] and len(dispatched) == 1
+    assert dispatched[0]["resource_type_id"] == "dd1f723d-0d1e-513f-8218-4055dc0530d0"
     rows = dispatched[0]["secrets"]
     assert len(rows) == 1 and rows[0]["user_id"] == RESOURCE
     decrypted = await adapter._decrypt_json(rows[0]["data"], expected_signer=fingerprint)

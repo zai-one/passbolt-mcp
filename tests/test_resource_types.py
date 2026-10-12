@@ -12,6 +12,7 @@ from zai_passbolt.adapter import (
     V5_PIN_CODE_RESOURCE_TYPE_ID,
     PassboltAdapter,
     validate_v5_metadata,
+    validate_v5_pin_code_metadata,
 )
 from zai_passbolt.transport import ProviderResponseError
 
@@ -171,3 +172,191 @@ async def test_use_secret_returns_only_delivery_flag() -> None:
     )
     assert result == {"delivered_to_sink": True}
     assert seen["password"] == PASSWORD_FIXTURE and NOTE_FIXTURE not in json.dumps(seen)
+
+
+PIN_RESOURCE_ID = "55555555-5555-4555-8555-555555555555"
+MODIFIED = "2026-10-01T00:00:00Z"
+
+
+class UpdateVaultAdapter(PassboltAdapter):
+    """One existing resource; records every encryption and the PUT payload."""
+
+    def __init__(self, resource_type_id: str, metadata: dict[str, Any]) -> None:
+        super().__init__("https://passbolt.example", "fixture-token", user_fingerprint="D" * 40)
+        self.resource_type_id = resource_type_id
+        self.metadata = metadata
+        self.encrypted: list[dict[str, Any]] = []
+        self.requests: list[tuple[str, str, dict[str, Any] | None]] = []
+        self.secret_source_read = False
+
+    async def _resource(self, resource_id: str) -> dict[str, Any]:
+        assert resource_id == PIN_RESOURCE_ID
+        return {
+            "id": resource_id,
+            "resource_type_id": self.resource_type_id,
+            "metadata": "existing-metadata",
+            "metadata_key_type": "user_key",
+            "modified": MODIFIED,
+            "folder_parent_id": None,
+            "expired": None,
+            "secrets": [{"data": "-----BEGIN PGP MESSAGE-----"}],
+            "permissions": [],
+        }
+
+    async def _decrypt_json(self, armored: str, *, expected_signer: str | None = None) -> dict[str, Any]:
+        assert armored == "existing-metadata"
+        return dict(self.metadata)
+
+    async def _metadata_key(self, key_id: str | None = None) -> dict[str, str]:
+        return {"id": "metadata-key", "fingerprint": "E" * 40}
+
+    async def _encrypt_json(self, value: Any, recipient: str) -> str:
+        self.encrypted.append(dict(value))
+        return "armored"
+
+    def _secret_from_source(self, source: Any) -> tuple[str, Any]:
+        self.secret_source_read = True
+        return PASSWORD_FIXTURE, None
+
+    async def _encrypted_secrets_for_resource(
+        self, resource: Any, secret_payload: Any
+    ) -> list[dict[str, str]]:
+        self.encrypted.append(dict(secret_payload))
+        return [{"user_id": "service", "data": "armored-secret"}]
+
+    async def _request(
+        self, method: str, path: str, *, payload: dict[str, Any] | None = None, **_kwargs: Any
+    ) -> Any:
+        self.requests.append((method, path, payload))
+        return {"id": PIN_RESOURCE_ID}
+
+    async def update(self, fields: dict[str, Any]) -> dict[str, Any]:
+        return await self.update_resource(
+            resource_id=PIN_RESOURCE_ID, fields=fields, expected_modified=MODIFIED
+        )
+
+
+def default_metadata() -> dict[str, Any]:
+    return {
+        "object_type": "PASSBOLT_RESOURCE_METADATA",
+        "resource_type_id": V5_DEFAULT_RESOURCE_TYPE_ID,
+        "name": "Office portal",
+        "username": "operator",
+        "uris": ["https://example.com/login"],
+        "description": "keep",
+        "custom_fields": [],
+    }
+
+
+async def test_pin_code_metadata_update_keeps_type_and_never_touches_the_secret() -> None:
+    adapter = UpdateVaultAdapter(V5_PIN_CODE_RESOURCE_TYPE_ID, pin_metadata())
+    result = await adapter.update({"name": "Back door", "description": "Rear entrance"})
+    assert result == {"resource_id": PIN_RESOURCE_ID, "updated": True}
+    [(method, _path, payload)] = adapter.requests
+    assert method == "PUT" and payload is not None
+    assert payload["resource_type_id"] == V5_PIN_CODE_RESOURCE_TYPE_ID
+    assert "secrets" not in payload and not adapter.secret_source_read
+    # Only the metadata was encrypted, in the exact v5-pin-code shape with the icon preserved.
+    assert adapter.encrypted == [
+        {
+            "object_type": "PASSBOLT_RESOURCE_METADATA",
+            "resource_type_id": V5_PIN_CODE_RESOURCE_TYPE_ID,
+            "name": "Back door",
+            "description": "Rear entrance",
+            "icon": {"type": "keepass-icon-set", "value": 1},
+        }
+    ]
+    assert PIN_FIXTURE not in json.dumps([result, adapter.requests, adapter.encrypted])
+
+
+async def test_pin_code_name_only_update_preserves_description() -> None:
+    adapter = UpdateVaultAdapter(V5_PIN_CODE_RESOURCE_TYPE_ID, pin_metadata())
+    await adapter.update({"name": "Back door"})
+    [metadata] = adapter.encrypted
+    assert metadata["description"] == "Main entrance" and metadata["name"] == "Back door"
+    assert not {"uris", "username", "custom_fields"} & set(metadata)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"secret_source": {"kind": "server_generated"}},
+        {"name": "Back door", "secret_source": {"kind": "server_generated"}},
+        {"uri": "https://example.com/door"},
+        {"username": "operator"},
+    ],
+)
+async def test_pin_code_update_refuses_password_fields_without_any_write(fields: dict[str, Any]) -> None:
+    adapter = UpdateVaultAdapter(V5_PIN_CODE_RESOURCE_TYPE_ID, pin_metadata())
+    with pytest.raises(ValueError, match="v5-pin-code update accepts only name and description"):
+        await adapter.update(fields)
+    assert adapter.requests == [] and adapter.encrypted == [] and not adapter.secret_source_read
+
+
+async def test_pin_code_metadata_outside_its_schema_fails_closed() -> None:
+    adapter = UpdateVaultAdapter(V5_PIN_CODE_RESOURCE_TYPE_ID, pin_metadata(uris=["https://example.com"]))
+    with pytest.raises(ValueError, match="outside its schema"):
+        await adapter.update({"name": "Back door"})
+    assert adapter.requests == [] and adapter.encrypted == []
+
+
+@pytest.mark.parametrize(
+    "type_id",
+    [
+        "7438294d-f71c-5164-ba95-d9e60e295564",  # v5-default-with-totp
+        "0551544e-2ccd-5ce8-95cf-86f0aab0f827",  # v5-custom-fields
+        "0a72c76b-b8e6-53f0-8bef-0a8ca6b5c764",  # v5-note
+        "a28a04cd-6f53-518a-967c-9963bf9cec51",  # v4 password-and-description
+        "99999999-9999-4999-8999-999999999999",  # unknown future type
+        "",
+    ],
+)
+async def test_other_resource_types_are_refused_without_any_write(type_id: str) -> None:
+    adapter = UpdateVaultAdapter(type_id, {**default_metadata(), "resource_type_id": type_id})
+    with pytest.raises(ValueError, match="only v5-default and v5-pin-code"):
+        await adapter.update({"name": "Renamed", "secret_source": {"kind": "server_generated"}})
+    assert adapter.requests == [] and adapter.encrypted == [] and not adapter.secret_source_read
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "metadata"),
+    [
+        (V5_PIN_CODE_RESOURCE_TYPE_ID, default_metadata()),
+        (V5_DEFAULT_RESOURCE_TYPE_ID, pin_metadata()),
+    ],
+)
+async def test_resource_and_metadata_type_mismatch_is_refused(
+    resource_type: str, metadata: dict[str, Any]
+) -> None:
+    adapter = UpdateVaultAdapter(resource_type, metadata)
+    with pytest.raises(ProviderResponseError, match="does not match its metadata"):
+        await adapter.update({"name": "Renamed"})
+    assert adapter.requests == [] and adapter.encrypted == []
+
+
+async def test_default_update_keeps_default_shape_and_rotates_password() -> None:
+    adapter = UpdateVaultAdapter(V5_DEFAULT_RESOURCE_TYPE_ID, default_metadata())
+    result = await adapter.update({"username": "new-user", "secret_source": {"kind": "server_generated"}})
+    assert result["updated"] is True
+    [(method, _path, payload)] = adapter.requests
+    assert method == "PUT" and payload is not None
+    assert payload["resource_type_id"] == V5_DEFAULT_RESOURCE_TYPE_ID
+    assert payload["secrets"] == [{"user_id": "service", "data": "armored-secret"}]
+    metadata, secret = adapter.encrypted
+    assert metadata == {**default_metadata(), "username": "new-user"}
+    assert secret["password"] == PASSWORD_FIXTURE and secret["object_type"] == "PASSBOLT_SECRET_DATA"
+    assert PASSWORD_FIXTURE not in json.dumps(result)
+
+
+def test_pin_code_metadata_validator_checks_icon_schema() -> None:
+    assert validate_v5_pin_code_metadata(pin_metadata(icon=None)) == {
+        "object_type": "PASSBOLT_RESOURCE_METADATA",
+        "resource_type_id": V5_PIN_CODE_RESOURCE_TYPE_ID,
+        "name": "Office door",
+        "description": "Main entrance",
+    }
+    icon = {"type": "passbolt-icon-set", "value": 0, "background_color": "#A1B2C3"}
+    assert validate_v5_pin_code_metadata(pin_metadata(icon=icon))["icon"] == icon
+    for bad in ({"type": "other"}, {"value": -1}, {"value": True}, {"background_color": "red"}, {"x": 1}):
+        with pytest.raises(ValueError, match="icon is invalid"):
+            validate_v5_pin_code_metadata(pin_metadata(icon=bad))

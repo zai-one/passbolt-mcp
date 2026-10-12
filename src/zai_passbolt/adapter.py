@@ -55,6 +55,13 @@ RESOURCE_TYPE_SLUGS = {
 }
 # Existing v5 metadata may carry up to 32 uris; v5-pin-code (5.12+) has none.
 MAX_READ_URIS = 32
+# Resource types update_resource can rewrite without changing their type. Any other type fails closed.
+UPDATABLE_RESOURCE_TYPE_IDS = frozenset({V5_DEFAULT_RESOURCE_TYPE_ID, V5_PIN_CODE_RESOURCE_TYPE_ID})
+# v5-pin-code metadata properties per passbolt_api SlugDefinition::v5PinCode(): name, description, icon.
+PIN_CODE_UPDATE_FIELDS = frozenset({"name", "description"})
+_PIN_CODE_METADATA_KEYS = frozenset({"object_type", "resource_type_id", "name", "description", "icon"})
+_ICON_TYPES = frozenset({"keepass-icon-set", "passbolt-icon-set"})
+_ICON_COLOR_RE = re.compile(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\Z")
 RESOURCE_METADATA_OBJECT_TYPE = "PASSBOLT_RESOURCE_METADATA"
 SECRET_DATA_OBJECT_TYPE = "PASSBOLT_SECRET_DATA"  # noqa: S105 -- schema discriminator
 METADATA_PRIVATE_KEY_OBJECT_TYPE = (  # noqa: S105 -- schema discriminator
@@ -377,6 +384,46 @@ def validate_v5_metadata(payload: Mapping[str, Any], *, strict_write: bool = Tru
         "description": description,
         "custom_fields": [],
     }
+
+
+def _metadata_icon(value: Any) -> dict[str, Any]:
+    """Validate a v5 metadata icon against the published Passbolt icon schema."""
+    if not isinstance(value, Mapping) or set(value) - {"type", "value", "background_color"}:
+        raise ValueError("Passbolt v5 metadata icon is invalid")
+    if "type" in value and value["type"] not in _ICON_TYPES:
+        raise ValueError("Passbolt v5 metadata icon is invalid")
+    number = value.get("value")
+    if number is not None and (isinstance(number, bool) or not isinstance(number, int) or number < 0):
+        raise ValueError("Passbolt v5 metadata icon is invalid")
+    color = value.get("background_color")
+    if color is not None and (not isinstance(color, str) or not _ICON_COLOR_RE.match(color)):
+        raise ValueError("Passbolt v5 metadata icon is invalid")
+    return dict(value)
+
+
+def validate_v5_pin_code_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and rebuild metadata in the Passbolt 5.12 v5-pin-code shape.
+
+    The v5-pin-code resource schema has only name (required), description and icon:
+    no uris, username or custom_fields. Fields outside it fail closed instead of being dropped.
+    """
+    if payload.get("object_type") != RESOURCE_METADATA_OBJECT_TYPE:
+        raise ValueError("Passbolt v5 metadata object_type is invalid")
+    if str(payload.get("resource_type_id") or "").lower() != V5_PIN_CODE_RESOURCE_TYPE_ID:
+        raise ValueError("Passbolt v5-pin-code metadata resource_type_id is invalid")
+    if any(
+        value not in (None, "", []) for key, value in payload.items() if key not in _PIN_CODE_METADATA_KEYS
+    ):
+        raise ValueError("Passbolt v5-pin-code metadata has fields outside its schema")
+    result: dict[str, Any] = {
+        "object_type": RESOURCE_METADATA_OBJECT_TYPE,
+        "resource_type_id": V5_PIN_CODE_RESOURCE_TYPE_ID,
+        "name": _text(payload.get("name"), "name", 255, required=True),
+        "description": _text(payload.get("description"), "description", 10_000),
+    }
+    if payload.get("icon") is not None:
+        result["icon"] = _metadata_icon(payload["icon"])
+    return result
 
 
 class PassboltSinkDispatcher:
@@ -1171,13 +1218,19 @@ class PassboltAdapter:
             _bounded_limit(limit),
         )
 
-    async def _hydrate_metadata(self, resource: Any) -> Any:
-        if not isinstance(resource, dict) or not resource.get("metadata"):
-            return resource
+    async def _decrypt_metadata(self, resource: Mapping[str, Any]) -> dict[str, Any]:
         key_id = resource.get("metadata_key_id")
         if resource.get("metadata_key_type") != "user_key":
             await self._metadata_key(str(key_id) if key_id else None)
         decrypted = await self._decrypt_json(str(resource["metadata"]))
+        if not isinstance(decrypted, dict):
+            raise ProviderResponseError("Passbolt resource metadata is invalid")
+        return decrypted
+
+    async def _hydrate_metadata(self, resource: Any) -> Any:
+        if not isinstance(resource, dict) or not resource.get("metadata"):
+            return resource
+        decrypted = await self._decrypt_metadata(resource)
         metadata = validate_v5_metadata(decrypted, strict_write=False)
         uris = metadata["uris"]
         return {
@@ -1583,22 +1636,42 @@ class PassboltAdapter:
         resource = await self._resource(resource_id)
         if str(resource.get("modified") or "") != expected_modified:
             raise PermissionError("Passbolt resource changed since confirmation")
-        hydrated = await self._hydrate_metadata(resource)
-        if not isinstance(hydrated, dict):
-            raise ProviderResponseError("Passbolt resource metadata is invalid")
         allowed = {"name", "uri", "username", "description", "secret_source"}
         if not isinstance(fields, Mapping) or not fields or set(fields) - allowed:
             raise ValueError("Passbolt update fields are empty or unsupported")
-        metadata = self._metadata(
-            name=_text(fields.get("name", hydrated.get("name")), "name", 255, required=True) or "",
-            uri=_https_url(str(fields.get("uri", hydrated.get("uri"))), "uri")
-            if fields.get("uri", hydrated.get("uri"))
-            else None,
-            username=_text(fields.get("username", hydrated.get("username")), "username", 255),
-            description=_text(fields.get("description"), "description", 10_000)
-            if "description" in fields
-            else _text(hydrated.get("description"), "description", 10_000),
-        )
+        # The update keeps the existing resource type; it never converts one type into another.
+        resource_type_id = str(resource.get("resource_type_id") or "").lower()
+        if resource_type_id not in UPDATABLE_RESOURCE_TYPE_IDS:
+            raise ValueError("Passbolt update supports only v5-default and v5-pin-code resources")
+        if resource_type_id == V5_PIN_CODE_RESOURCE_TYPE_ID and set(fields) - PIN_CODE_UPDATE_FIELDS:
+            # The secret source generates passwords, not PINs; PIN entries have no uri or username.
+            raise ValueError("Passbolt v5-pin-code update accepts only name and description")
+        if not resource.get("metadata"):
+            raise ProviderResponseError("Passbolt resource metadata is invalid")
+        decrypted = await self._decrypt_metadata(resource)
+        if str(decrypted.get("resource_type_id") or "").lower() != resource_type_id:
+            raise ProviderResponseError("Passbolt resource type does not match its metadata")
+        if resource_type_id == V5_PIN_CODE_RESOURCE_TYPE_ID:
+            current_pin = validate_v5_pin_code_metadata(decrypted)
+            metadata = validate_v5_pin_code_metadata(
+                {
+                    **current_pin,
+                    **{key: fields[key] for key in PIN_CODE_UPDATE_FIELDS if key in fields},
+                }
+            )
+        else:
+            current = validate_v5_metadata(decrypted, strict_write=False)
+            current_uri = current["uris"][0] if current["uris"] else None
+            metadata = self._metadata(
+                name=_text(fields.get("name", current["name"]), "name", 255, required=True) or "",
+                uri=_https_url(str(fields.get("uri", current_uri)), "uri")
+                if fields.get("uri", current_uri)
+                else None,
+                username=_text(fields.get("username", current["username"]), "username", 255),
+                description=_text(fields.get("description"), "description", 10_000)
+                if "description" in fields
+                else current["description"],
+            )
         metadata_key = await self._metadata_key()
         payload: dict[str, Any] = {
             "folder_parent_id": resource.get("folder_parent_id"),
@@ -1606,7 +1679,7 @@ class PassboltAdapter:
             "metadata_key_id": metadata_key["id"],
             "metadata_key_type": "shared_key",
             "metadata": await self._encrypt_json(metadata, metadata_key["fingerprint"]),
-            "resource_type_id": V5_DEFAULT_RESOURCE_TYPE_ID,
+            "resource_type_id": resource_type_id,
         }
         if "secret_source" in fields:
             source = fields["secret_source"]
