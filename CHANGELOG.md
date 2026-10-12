@@ -1,49 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-- Passbolt 5.12 PIN code resources (`v5-pin-code`): their metadata has no `uris`, which previously failed the whole
-  search. They are now listed by name and description. The PIN is never returned, and `passbolt_use_secret`
-  refuses to deliver it.
-- `passbolt_update_resource` keeps the existing resource type and never converts one type into another. It reads the
-  type from the resource's `resource_type_id` and refuses the update if the decrypted metadata names a different type.
-  `v5-pin-code` entries accept only `name` and `description`: the metadata is
-  rebuilt in the v5-pin-code shape (name, description, icon kept), the PIN secret is not read, re-encrypted or sent,
-  and `uri`, `username` and `secret_source` are refused because the generator produces passwords, not PINs.
-  Every other or unknown type (TOTP, custom fields, notes, v4 types) is refused before any write.
-- `passbolt_update_resource` on `v5-default` entries no longer loses data. Previously the metadata was rebuilt with
-  only the first uri, no icon and empty custom fields, and a `secret_source` rotation dropped the secret's description
-  and custom fields. Now only the requested fields change: every uri, the icon and the metadata custom fields are kept
-  as stored; `uri` replaces only the first (primary) uri and keeps the others (`null` or `""` removes only the primary
-  uri). A password rotation decrypts the existing secret inside server custody and keeps its description and custom
-  fields; only the password changes, and nothing of the old secret is returned or logged. Metadata or a secret outside
-  the Passbolt `v5-default` schema (unknown properties, more than 32 uris, invalid icon or custom fields) is refused
-  before any encryption or write instead of being silently dropped.
-- `passbolt_update_resource` checks a new `uri` against the same domain policy as `passbolt_create_resource` and
-  refuses an off-policy uri before any approval, secret-source read, decryption, encryption or write. Removing the
-  primary uri (`null` or `""`) needs no domain check. New uris on create and update are limited to the 1024 characters
-  of the Passbolt v5 schema.
-- Update check hardening: only plain version tags (`v1.2.3`) are accepted, so a malformed or hostile tag never reaches
-  results, update commands, the cache or server instructions; cached values are re-validated on read. Every GitHub
-  request attempt is recorded: after a failure no new request is made for 30 minutes, `force=true` is honoured at most
-  once a minute, and the startup refresh follows the same rules.
-- `passbolt_select` is annotated `readOnlyHint: false`: it records a selection that authorises a later
-  `passbolt_use_secret`. It remains non-destructive.
-- Search and select results carry `resource_type` (the Passbolt slug, or `unknown`) derived from `resource_type_id`.
-- Read mode accepts the documented 32 `uris` per v5 resource (writes stay limited to 10).
-- `passbolt_check_update`: suggests a newer GitHub release with its notes link and update command;
-  anonymous public API, 3 s timeout, 24 h cache, graceful offline, never auto-updates and never touches the vault.
-  A cached "update available" hint appears in server instructions and `passbolt_status`.
-  Opt out with `PASSBOLT_DISABLE_UPDATE_CHECK=1`.
-- MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool.
-- Tests assert that passwords, PINs, secure notes and encrypted payloads never appear in search, select or use results.
-
-## 0.3.1
-
-- Add request-local, closed-vocabulary readiness stage/reason logs without exception text or secret material; retain the three-boolean MCP status contract.
-- Distinguish metadata key trust checks, metadata decryption, secret fetching and secret decryption without relaxing any trust predicate.
-- Test concurrent/cancelled probes, malformed key envelopes, real-GPG diagnostic refusal and approved encrypted password updates with disposable keys.
-- Document embedded composition, registered authentication handlers and the distinction between updating a vault record and rotating a website password.
+- Safe readiness diagnostics: request-local, closed-vocabulary stage/reason logs without exception text or secret
+  material; metadata key trust, metadata decryption, secret fetch and secret decryption are reported separately without
+  relaxing any trust predicate. The three-boolean `passbolt_status` contract is unchanged.
+- Passbolt 5.12 PIN code resources (`v5-pin-code`) are listed by name and description instead of failing the whole
+  search. The PIN is never returned, and `passbolt_use_secret` refuses to deliver it.
+- Type-preserving `passbolt_update_resource`: the type comes from `resource_type_id` and is never converted.
+  `v5-pin-code` entries accept only `name` and `description` and the PIN secret is not read, re-encrypted or sent;
+  other or unknown types (TOTP, custom fields, notes, v4) are refused before any write.
+- `v5-default` updates keep every uri, the icon and custom fields; `uri` replaces only the primary uri, and a password
+  rotation keeps the secret's description and custom fields inside server custody. Data outside the v5 schema is
+  refused before any encryption or write instead of being dropped.
+- A new `uri` on update follows the same domain policy as create and is checked before any approval, secret read,
+  decryption or write; new uris are limited to 1024 characters. Read mode accepts up to 32 uris per v5 resource.
+- Search and select results carry `resource_type` (Passbolt slug or `unknown`).
+- MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool;
+  `passbolt_select` is `readOnlyHint: false` because it authorises a later `passbolt_use_secret`.
+- Suggest-only update checker `passbolt_check_update`: anonymous GitHub API, 3 s timeout, 24 h cache, plain `vX.Y.Z`
+  tags only, 30-minute back-off after a failure, never auto-updates or touches the vault. A cached hint appears in
+  server instructions and `passbolt_status`; opt out with `PASSBOLT_DISABLE_UPDATE_CHECK=1`.
+- Tests: passwords, PINs, secure notes and encrypted payloads never appear in search, select or use results;
+  concurrent/cancelled probes, malformed key envelopes, real-GPG diagnostic refusal and approved encrypted password
+  updates with disposable keys.
+- Docs: embedded composition, registered authentication handlers, and updating a vault record versus rotating a
+  website password.
 
 ## 0.3.0
 
