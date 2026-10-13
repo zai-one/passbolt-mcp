@@ -359,3 +359,50 @@ async def test_update_accepts_policy_uri_or_primary_uri_removal(config, uri):
     assert (await call("passbolt_update_resource", **args, approval_id=approval))["updated"]
     [(kind, kwargs)] = adapter.calls
     assert kind == "update" and kwargs["fields"]["uri"] == uri
+
+
+async def test_share_elicitation_only_for_valid_matching_approval(config, monkeypatch):
+    from zai_passbolt import tools as tools_mod
+
+    asked = []
+
+    async def fake_confirm(message, mode="auto"):
+        asked.append(message)
+        return "accepted"
+
+    monkeypatch.setattr(tools_mod, "confirm_share", fake_confirm)
+    adapter = FixtureAdapter()
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE, "permission": "read", "idempotency_key": "s1", "users": [RESOURCE]}
+    prepared = await call("passbolt_share_resource", **args)
+    assert not asked and not adapter.calls
+    # Prepared but not accepted, or a random id: no prompt, and the write is refused.
+    for bogus in (prepared["approval_id"], str(uuid4()), "not-a-uuid"):
+        with pytest.raises(SafeToolError):
+            await call("passbolt_share_resource", **args, approval_id=bogus)
+    assert not asked and not adapter.calls
+    approval = await approve(runtime, prepared)
+    # Accepted approval but a different request (other permission): no prompt, refused.
+    with pytest.raises(SafeToolError):
+        await call("passbolt_share_resource", **{**args, "permission": "update"}, approval_id=approval)
+    assert not asked
+    result = await call("passbolt_share_resource", **args, approval_id=approval)
+    assert result["shared"] and result["elicitation"] == "accepted" and len(asked) == 1
+
+
+async def test_move_resource_is_approval_gated(config):
+    adapter = FixtureAdapter()
+    moved = []
+
+    async def move_resource(resource_id, folder_id):
+        moved.append((resource_id, folder_id))
+        return {"resource_id": resource_id, "folder_id": folder_id, "moved": True}
+
+    adapter.move_resource = move_resource
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE, "idempotency_key": "m1"}
+    prepared = await call("passbolt_move_resource", **args)
+    assert prepared["confirmation_required"] and not moved
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_resource", **args, approval_id=approval))["moved"]
+    assert moved == [(RESOURCE, None)]

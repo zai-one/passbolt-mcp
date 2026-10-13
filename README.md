@@ -221,4 +221,4 @@ deployments. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off, for example o
 
 ## Share confirmation and opt-in toolsets
 
-Before any approved share the server asks the user via MCP elicitation (`PASSBOLT_SHARE_ELICITATION=auto|required|off`). `PASSBOLT_TOOLSETS=default,directory` adds `passbolt_directory`. Full map: `passbolt://guide/tool-map`.
+Before any approved share the server asks the user via MCP elicitation (`PASSBOLT_SHARE_ELICITATION=auto|required|off`). Only a valid, accepted approval for the exact request triggers the prompt. `PASSBOLT_TOOLSETS=default,directory,organize` adds `passbolt_directory` and `passbolt_move_resource`. Full map: `passbolt://guide/tool-map`.

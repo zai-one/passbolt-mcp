@@ -1930,6 +1930,13 @@ class PassboltAdapter:
             ],
         )
 
+    async def move_resource(self, resource_id: str, folder_id: str | None) -> dict[str, Any]:
+        """Move one resource into a folder, or to the root when folder_id is None (PUT /move/resource)."""
+        rid = _uuid(resource_id, "resource_id")
+        parent = _uuid(folder_id, "folder_id") if folder_id is not None else None
+        await self._request("PUT", f"/move/resource/{quote(rid)}.json", payload={"folder_parent_id": parent})
+        return {"resource_id": rid, "folder_id": parent, "moved": True}
+
     async def list_directory(self) -> dict[str, Any]:
         """Share-target directory: group/user UUIDs with display names; emails are not returned."""
         groups, users = await self._directory()
