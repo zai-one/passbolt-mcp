@@ -1930,6 +1930,54 @@ class PassboltAdapter:
             ],
         )
 
+    async def list_directory(self) -> dict[str, Any]:
+        """Share-target directory: group/user UUIDs with display names; emails are not returned."""
+        groups, users = await self._directory()
+        profile = lambda u: u.get("profile") if isinstance(u.get("profile"), Mapping) else {}  # noqa: E731
+        return {
+            "groups": [
+                {
+                    "group_id": str(g.get("id")),
+                    "name": g.get("name"),
+                    "members": len(g.get("groups_users") or []),
+                }
+                for g in groups
+            ][:MAX_RESOURCE_SCAN],
+            "users": [
+                {
+                    "user_id": str(u.get("id")),
+                    "name": " ".join(
+                        str(part)
+                        for part in (profile(u).get("first_name"), profile(u).get("last_name"))
+                        if part
+                    ),
+                    "role": (u.get("role") or {}).get("name") if isinstance(u.get("role"), Mapping) else None,
+                }
+                for u in users
+            ][:MAX_RESOURCE_SCAN],
+        }
+
+    async def resource_permissions(self, resource_id: str) -> dict[str, Any]:
+        """Who can access one resource (GET /permissions/resource/{id}.json). Metadata only."""
+        rid = str(UUID(str(resource_id)))
+        payload = await self._request("GET", f"/permissions/resource/{rid}.json")
+        body = _unwrap(payload)
+        if not isinstance(body, list):
+            raise ProviderResponseError("Passbolt permissions response is not a list")
+        levels = {1: "read", 7: "update", 15: "owner"}
+        return {
+            "resource_id": rid,
+            "permissions": [
+                {
+                    "aro": item.get("aro"),
+                    "aro_id": str(item.get("aro_foreign_key")),
+                    "permission": levels.get(item.get("type"), item.get("type")),
+                }
+                for item in body
+                if isinstance(item, Mapping)
+            ],
+        }
+
     async def all_share_user_ids(self) -> list[str]:
         """Resolve all active users in this vault at approval-preparation time.
 

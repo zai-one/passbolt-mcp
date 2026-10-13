@@ -1,5 +1,14 @@
 # Changelog
 
+
+## Unreleased
+
+- Shares now ask the user through MCP elicitation right before an approved share executes
+  (`passbolt_share_resource`, create resource/folder with `share_with_*`); decline/cancel aborts and is
+  audited. `PASSBOLT_SHARE_ELICITATION=auto|required|off` (default `auto`). Operator approval still required.
+- Opt-in `directory` toolset: `passbolt_directory` (group/user UUIDs for sharing; per-resource permissions).
+- Router generated from `ROUTES` with tool/skill/guide per line and playbook + `guide/tool-map` fallback.
+- Router eval: 18 RU/EN requests; fails on any unreachable tool, skill or guide.
 ## 0.5.0
 
 - License: LicenseRef-ZAI-ONE 2.0 (source-available). Free install and use for yourself and your organisation, including commercial work; issues and pull requests welcome; copying code into other projects, redistribution, embedding and competing hosted services need written permission. Earlier releases keep their LicenseRef-ZAI-ONE 1.0 terms (see NOTICE). README first screen: one-line scope, why this MCP, maintenance and update check.

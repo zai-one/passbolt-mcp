@@ -5,21 +5,35 @@ Invariant: no tool returns a password, TOTP seed or secret note to the conversat
 
 from __future__ import annotations
 
-from zai_passbolt.agent_layer import Profile, Prompt
+from zai_passbolt.agent_layer import Profile, Prompt, Route, build_router
 
-ROUTER = """Passbolt MCP: use vault credentials WITHOUT seeing them. No tool returns passwords to the chat.
-Toolsets: meta, read, use, write (see passbolt://toolsets); PASSBOLT_READ_ONLY=1 keeps metadata reads only.
-Secrets go only to operator-registered sinks (secure_fill, out_file, https_probe): \
-passbolt_search -> passbolt_select(target_url) -> passbolt_use_secret(selection_id, sink_ref).
-Never ask the user to paste a password; never print, log or summarise a secret; new secrets are \
-server_generated or sealed_ref.
-Update/share are approval-gated: the first call returns approval_id; the operator accepts it outside MCP; \
-never accept it yourself; repeat the call with approval_id.
-Playbooks: skills passbolt-secret-handoff, passbolt-access-review, passbolt-onboard-client; or \
-passbolt://playbook, passbolt://guide/{security,sinks,errors}.
-Errors: retry only when retryable; policy denials are final."""
+ROUTES = (
+    Route("login", "войти, залогиниться, пароль, доступ к сайту, login, sign in, password",
+          "passbolt_use_secret", "passbolt-secret-handoff", "sinks"),
+    Route("find", "найти учётку, креды, поиск, find, search, credential", "passbolt_search",
+          "passbolt-secret-handoff", "security"),
+    Route("review", "аудит, ревизия, папки, кто видит, права, review, audit, folders",
+          "passbolt_list_folders", "passbolt-access-review", "security"),
+    Route("onboard", "новый клиент, создать запись, папку, onboard, create, new", "passbolt_create_resource",
+          "passbolt-onboard-client", "playbook"),
+    Route("share", "поделиться, расшарить, выдать доступ, share, grant, группы", "passbolt_share_resource",
+          "", "security"),
+    Route("status", "статус, проверка, ключ, ошибка, setup, status, error", "passbolt_status", "", "errors"),
+)  # fmt: skip
+
+ROUTER = build_router(
+    "passbolt",
+    "Passbolt MCP: use vault credentials WITHOUT seeing them; no tool returns passwords. "
+    "Secrets go only to registered sinks: "
+    "search -> select(target_url) -> use_secret(selection_id, sink_ref).",
+    ROUTES,
+    "Update/share: first call returns approval_id; operator accepts outside MCP (never yourself); repeat "
+    "with approval_id; shares also ask the user via elicitation. Never ask to paste a password.",
+)
 
 DESCRIPTIONS = {
+    "passbolt_directory": "List group/user UUIDs for sharing, or who can access one resource. Use before "
+    "share or in access reviews. Metadata only; no emails, never secrets.",
     "passbolt_local_diagnostics": "Check local key usability and binding policy. Use when setup fails; "
     "vault auth via `passbolt_status`. Cost: no vault call; never returns secrets.",
     "passbolt_status": "Probe Passbolt auth and a v5 decrypt canary. Use before first real task. "
@@ -53,7 +67,9 @@ TOOLSETS = {
         "passbolt_create_folder",
         "passbolt_share_resource",
     ),
+    "directory": ("passbolt_directory",),
 }
+OPTIN = ("directory",)
 
 PROMPTS = (
     Prompt(
@@ -79,4 +95,6 @@ PROFILE = Profile(
     descriptions=DESCRIPTIONS,
     toolsets=TOOLSETS,
     prompts=PROMPTS,
+    routes=ROUTES,
+    optin=OPTIN,
 )

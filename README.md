@@ -217,3 +217,8 @@ deployments. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off, for example o
 - **Contribute:** [issues](https://github.com/zai-one/passbolt-mcp/issues/new/choose) and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Never post tokens, cookies, sessions or account data.
 - **Not allowed without written permission from ZAI.ONE:** copying code into other projects, forking for redistribution, embedding the server in other products or offering it as a competing service.
 - License: [LicenseRef-ZAI-ONE 2.0](LICENSE) (source-available, not open source). Third-party notices and license history: [NOTICE](NOTICE).
+
+
+## Share confirmation and opt-in toolsets
+
+Before any approved share the server asks the user via MCP elicitation (`PASSBOLT_SHARE_ELICITATION=auto|required|off`). `PASSBOLT_TOOLSETS=default,directory` adds `passbolt_directory`. Full map: `passbolt://guide/tool-map`.

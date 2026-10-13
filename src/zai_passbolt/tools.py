@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from zai_passbolt import update_check
 from zai_passbolt.adapter import PassboltAccessPolicy, PassboltAdapter
+from zai_passbolt.elicitation import confirm_share, share_summary
 from zai_passbolt.transport import LocalPreDispatchDenied, ProviderError, ProviderHttpError, request_hash
 
 # MCP tool annotations are client hints only; scopes, policies, approvals and
@@ -515,6 +516,24 @@ def register_tools(server: Any, runtime: Any) -> None:
         return result
 
     @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
+    async def passbolt_directory(resource_id: str | None = None) -> dict[str, Any]:
+        """Groups/users UUIDs for sharing, or who can access one resource (resource_id). No emails."""
+        adapter, _policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
+        if resource_id is not None and resources is not None and resource_id not in resources:
+            raise PermissionError("Passbolt resource policy denied")
+        result = await _provider_read(
+            "passbolt",
+            "directory",
+            {"resource_id": resource_id},
+            (lambda: adapter.resource_permissions(resource_id))
+            if resource_id is not None
+            else adapter.list_directory,
+            validate=lambda: None,
+        )
+        await _passbolt_audit("passbolt:read", "directory", "success", resource_id=resource_id)
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_list_folders() -> dict[str, Any]:
         """List folder metadata (id, name, parent, personal) within this binding's folder policy."""
         adapter, _policy, _resources, folders, _vault_profile = await _passbolt_access_policy()
@@ -585,6 +604,19 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return public
 
+    async def _elicit_share(
+        kind: str, target: str, groups: list[str], users: list[str], permission: str, approval_id: str | None
+    ) -> str | None:
+        """Ask the human via MCP elicitation right before an approved share executes."""
+        if approval_id is None or not (groups or users):
+            return None
+        mode = getattr(settings, "passbolt_share_elicitation", "auto")
+        try:
+            return await confirm_share(share_summary(kind, target, groups, users, permission), mode)
+        except PermissionError:
+            await _passbolt_audit("passbolt:write", f"{kind}_share_elicitation", "denied")
+            raise
+
     @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CREATE)
     async def passbolt_create_resource(
         name: str,
@@ -634,6 +666,7 @@ def register_tools(server: Any, runtime: Any) -> None:
             "share_mode": share_mode,
             "resource_type": resource_type,
         }
+        await _elicit_share("resource", name, resolved_groups, resolved_users, "read", approval_id)
 
         async def verify_secret_cleanup(value: dict[str, Any]) -> None:
             if secret_source.get("kind") != "sealed_ref" or not value.get("created"):
@@ -792,6 +825,7 @@ def register_tools(server: Any, runtime: Any) -> None:
             "share_with_users": resolved_users,
             "share_mode": share_mode,
         }
+        await _elicit_share("folder", name, resolved_groups, resolved_users, "read", approval_id)
         try:
             result = await _passbolt_write(
                 "create_folder",
@@ -862,6 +896,9 @@ def register_tools(server: Any, runtime: Any) -> None:
             "permission": permission,
             "share_mode": share_mode,
         }
+        elicited = await _elicit_share(
+            "resource", resource_id, resolved_groups, resolved_users, permission, approval_id
+        )
         try:
             result = await _passbolt_write(
                 "share_resource",
@@ -885,6 +922,8 @@ def register_tools(server: Any, runtime: Any) -> None:
             "success" if result.get("shared") else "prepared",
             resource_id=resource_id,
         )
+        if elicited:
+            result = {**result, "elicitation": elicited}
         return result
 
     @server.tool(auth=require_scopes("passbolt:use"), annotations=SECRET_USE)

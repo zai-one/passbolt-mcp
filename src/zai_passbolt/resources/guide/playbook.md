@@ -18,3 +18,10 @@ secret notes; the agent only handles metadata and IDs.
 
 Skills: `passbolt-secret-handoff`, `passbolt-access-review`, `passbolt-onboard-client`.
 Security rules: `passbolt://guide/security`.
+
+Sharing: every approved share (`passbolt_share_resource`, create with `share_with_*`) also asks the user
+through MCP elicitation when the client supports it (`PASSBOLT_SHARE_ELICITATION=auto|required|off`).
+Opt-in `directory` toolset (`PASSBOLT_TOOLSETS=default,directory`): `passbolt_directory` lists group/user
+UUIDs for sharing or who can access one resource.
+Guides: `passbolt://guide/security`, `passbolt://guide/sinks`, `passbolt://guide/errors`,
+`passbolt://guide/tool-map`. Errors: retry only when retryable; policy denials are final.
