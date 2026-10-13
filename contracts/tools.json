@@ -9,7 +9,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Probe real Passbolt auth and a bounded v5 decrypt canary without returning secrets."
+    "description": "Probe Passbolt auth and a v5 decrypt canary. Use before first real task. Returns booleans only; never secrets."
   },
   "passbolt_search": {
     "inputSchema": {
@@ -43,7 +43,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Search only v5 metadata decrypted inside server custody."
+    "description": "Search resource metadata (name, URI, username) within policy. Use to find a credential; then `passbolt_select`. Never returns passwords."
   },
   "passbolt_select": {
     "inputSchema": {
@@ -70,7 +70,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Bind a safe metadata selection to this principal and exact target URL."
+    "description": "Bind one matching resource to this principal and exact target URL; returns selection_id. Use before `passbolt_use_secret`. Metadata only."
   },
   "passbolt_create_resource": {
     "inputSchema": {
@@ -175,7 +175,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Create a v5 resource from server-generated or sealed server ingress."
+    "description": "Create a v5 resource with a server_generated or sealed_ref secret (no plaintext input). Use for onboarding. Writes: idempotent, within policy."
   },
   "passbolt_update_resource": {
     "inputSchema": {
@@ -218,7 +218,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Approval-gated v5 resource update with optimistic concurrency."
+    "description": "Update a resource (approval-gated, optimistic concurrency). First call returns approval_id; repeat after operator acceptance. Writes: overwrites."
   },
   "passbolt_create_folder": {
     "inputSchema": {
@@ -295,7 +295,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Create one folder idempotently; group refs are UUID-only."
+    "description": "Create one folder idempotently; group refs are UUIDs. Use for client onboarding. Writes: within folder policy."
   },
   "passbolt_share_resource": {
     "inputSchema": {
@@ -365,7 +365,7 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Approval-gated share; group/user references are UUID-only."
+    "description": "Share a resource with groups/users (approval-gated; UUID refs). First call returns approval_id; operator accepts outside MCP. Writes: grants access."
   },
   "passbolt_use_secret": {
     "inputSchema": {
@@ -410,6 +410,6 @@
       "additionalProperties": true,
       "type": "object"
     },
-    "description": "Deliver a selected secret to one registered server-local sink only."
+    "description": "Deliver a selected secret to one registered sink (secure_fill/out_file/https_probe). Use to log in or hand off; the secret never enters the chat. Requires passbolt:use."
   }
 }

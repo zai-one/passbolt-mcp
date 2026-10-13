@@ -12,6 +12,9 @@ from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from zai_passbolt import __version__
+from zai_passbolt.agent_layer import apply as apply_agent_layer
+from zai_passbolt.agent_layer import router_instructions
+from zai_passbolt.agent_profile import PROFILE
 from zai_passbolt.config import ServiceConfig
 from zai_passbolt.onboarding import check_config, load_config
 from zai_passbolt.runtime import Runtime
@@ -82,10 +85,11 @@ def create_server(
         auth=auth,
         mask_error_details=True,
         lifespan=lifespan,
-        instructions=SERVER_INSTRUCTIONS + (f" {hint}" if hint else ""),
+        instructions=router_instructions(PROFILE, hint),
     )
     registrar = ToolRegistrar(server, runtime)
     register_tools(registrar, runtime)
+    apply_agent_layer(server, PROFILE)
     return server
 
 

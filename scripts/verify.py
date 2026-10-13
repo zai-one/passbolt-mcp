@@ -8,7 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
-    for args in (["-m", "ruff", "check", "src", "tests", "scripts"], ["-m", "pytest", "-q"]):
+    for args in (
+        ["-m", "ruff", "check", "src", "tests", "scripts"],
+        ["-m", "pytest", "-q"],
+        ["scripts/token_budget.py"],
+    ):
         result = subprocess.run([sys.executable, *args], cwd=ROOT)
         if result.returncode:
             raise SystemExit(result.returncode)

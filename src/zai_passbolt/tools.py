@@ -514,6 +514,24 @@ def register_tools(server: Any, runtime: Any) -> None:
         await _passbolt_audit("passbolt:read", "search", "success")
         return result
 
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
+    async def passbolt_list_folders() -> dict[str, Any]:
+        """List folder metadata (id, name, parent, personal) within this binding's folder policy."""
+        adapter, _policy, _resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            result = await _provider_read(
+                "passbolt",
+                "list_folders",
+                {},
+                lambda: adapter.list_folders(allowed_folder_ids=folders),
+                validate=lambda: None,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:read", "list_folders", "error")
+            raise
+        await _passbolt_audit("passbolt:read", "list_folders", "success")
+        return result
+
     @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_SELECT)
     async def passbolt_select(target_url: str, query: str = "", limit: int = 10) -> dict[str, Any]:
         """Bind a safe metadata selection to this principal and exact target URL."""

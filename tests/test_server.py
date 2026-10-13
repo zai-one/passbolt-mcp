@@ -41,7 +41,11 @@ async def test_frozen_original_eight_tools_match(config):
             for tool in await client.list_tools()
         }
     assert {name: actual[name] for name in expected} == expected
-    assert set(actual) - set(expected) == {"passbolt_local_diagnostics", "passbolt_check_update"}
+    assert set(actual) - set(expected) == {
+        "passbolt_local_diagnostics",
+        "passbolt_check_update",
+        "passbolt_list_folders",
+    }
 
 
 async def test_http_auth_scopes_actor_account_and_selection_ownership(config):
@@ -63,7 +67,7 @@ async def test_http_auth_scopes_actor_account_and_selection_ownership(config):
         )
 
     async with connection(server, token(scopes=["passbolt:read"])) as client:
-        assert len(await client.list_tools()) == 5
+        assert len(await client.list_tools()) == 6
         with pytest.raises(ToolError):
             await client.call_tool("passbolt_create_resource", CREATE)
     for bearer in [token(account="other"), token(actor="unbound")]:
@@ -100,7 +104,7 @@ async def test_real_stdio_discovery_without_vault_network(config, tmp_path):
         "PASSBOLT_DISABLE_UPDATE_CHECK": "1",
     }
     async with Client(StdioTransport(command=sys.executable, args=["-m", "zai_passbolt"], env=env)) as client:
-        assert len(await client.list_tools()) == 5
+        assert len(await client.list_tools()) == 6
 
 
 def test_http_fails_without_public_key(config):
@@ -112,7 +116,7 @@ async def test_stdio_enforces_local_scope_even_with_writes_enabled(config):
     adapter = FixtureAdapter()
     settings = replace(config, local_scopes=frozenset({"passbolt:read"}))
     async with Client(create_server(settings, transport="stdio", adapter=adapter)) as client:
-        assert len(await client.list_tools()) == 5
+        assert len(await client.list_tools()) == 6
         with pytest.raises(ToolError):
             await client.call_tool("passbolt_create_resource", CREATE)
     assert not adapter.calls

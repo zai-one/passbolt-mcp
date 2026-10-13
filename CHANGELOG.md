@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Agent layer: router `instructions` (≤1200 chars: secrets never in chat, sink flow, operator approvals), compact template descriptions and titles; all descriptions ASCII.
+- Toolsets `meta`, `read`, `use`, `write` (`PASSBOLT_TOOLSETS`, `PASSBOLT_TOOLS`, `PASSBOLT_DISABLED_TOOLS`, `PASSBOLT_READ_ONLY=1` = metadata reads only); `passbolt://toolsets`.
+- New read-only `passbolt_list_folders` (`GET /folders.json`; id, name, parent, personal; v5 names decrypted in custody; folder policy enforced).
+- Resources `passbolt://playbook`, `passbolt://guide/{security,sinks,errors}`; prompts `secret_handoff`, `access_review`.
+- Self-contained skills `passbolt-secret-handoff`, `passbolt-access-review`, `passbolt-onboard-client`; Claude Code plugin manifest, Cursor rule, `.agents/skills`.
+- `scripts/token_budget.py` + tests gate instruction, description and SKILL.md sizes.
+
 ## 0.4.0
 
 - Safe readiness diagnostics: request-local, closed-vocabulary stage/reason logs without exception text or secret

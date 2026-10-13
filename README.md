@@ -77,6 +77,83 @@ A configured vault returns connection/decryption status and matching entry metad
 
 If tools do not appear, check the absolute path, whether the client can find `uv`, and the `--check-config` result. For access errors, check account credentials and permissions. [Installation and troubleshooting](INSTALL.md).
 
+
+<!-- agent-block:start -->
+## Install in your agent
+
+Run `passbolt-mcp` straight from GitHub with [uv](https://docs.astral.sh/uv/). Pin a release tag (`@vX.Y.Z`) for
+reproducible installs; placeholders below are examples, keep secrets in files outside the repo.
+
+**Claude Code**
+
+```bash
+claude mcp add passbolt --env PASSBOLT_SECRET_FILE=/path/to/passbolt.env --env PASSBOLT_BINDINGS_FILE=/path/to/bindings.json --env PASSBOLT_STATE_PATH=/path/to/passbolt.sqlite -- uvx --from "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp" passbolt-mcp
+```
+
+Skills for Claude Code: copy `skills/*` into `~/.claude/skills/` (or install this repo as a plugin — it
+ships `.claude-plugin/plugin.json` with the skills and the MCP server).
+
+**Cursor** — `.cursor/mcp.json` ([one-click install](cursor://anysphere.cursor-deeplink/mcp/install?name=passbolt&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAiemFpLXBhc3Nib2x0LW1jcFtzdGFuZGFsb25lXSBAIGdpdCtodHRwczovL2dpdGh1Yi5jb20vemFpLW9uZS9wYXNzYm9sdC1tY3AiLCAicGFzc2JvbHQtbWNwIl0sICJlbnYiOiB7IlBBU1NCT0xUX1NFQ1JFVF9GSUxFIjogIi9wYXRoL3RvL3Bhc3Nib2x0LmVudiIsICJQQVNTQk9MVF9CSU5ESU5HU19GSUxFIjogIi9wYXRoL3RvL2JpbmRpbmdzLmpzb24iLCAiUEFTU0JPTFRfU1RBVEVfUEFUSCI6ICIvcGF0aC90by9wYXNzYm9sdC5zcWxpdGUifX0=)):
+
+```json
+{
+  "mcpServers": {
+    "passbolt": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp",
+        "passbolt-mcp"
+      ],
+      "env": {
+        "PASSBOLT_SECRET_FILE": "/path/to/passbolt.env",
+        "PASSBOLT_BINDINGS_FILE": "/path/to/bindings.json",
+        "PASSBOLT_STATE_PATH": "/path/to/passbolt.sqlite"
+      }
+    }
+  }
+}
+```
+
+**Codex** — `~/.codex/config.toml` (skills: copy `skills/*` into `~/.codex/skills/`, or keep the
+repo's `.agents/skills` link):
+
+```toml
+[mcp_servers.passbolt]
+command = "uvx"
+args = ["--from", "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp", "passbolt-mcp"]
+env = { PASSBOLT_SECRET_FILE = "/path/to/passbolt.env", PASSBOLT_BINDINGS_FILE = "/path/to/bindings.json", PASSBOLT_STATE_PATH = "/path/to/passbolt.sqlite" }
+```
+
+**Claude Desktop** — `claude_desktop_config.json`: the same `mcpServers` block as Cursor.
+
+## Skills (agent playbooks)
+
+Each skill is a self-contained folder `skills/<name>/` (`SKILL.md` + its own `references/`,
+`templates/`); copy the folder and it works. Agents load the short `SKILL.md` only when the task matches
+and open the other files on demand. Clients without skills get the same flows as MCP prompts and the
+`passbolt://playbook` / `passbolt://guide/{topic}` resources.
+
+| Skill | What it does |
+|---|---|
+| `passbolt-secret-handoff` | Use a credential via a registered sink; the secret never enters the chat. |
+| `passbolt-access-review` | Metadata-only review: folders, resources, duplicates, incomplete records. |
+| `passbolt-onboard-client` | Folder + resources with server-generated secrets + approval-gated sharing. |
+
+## Toolsets and read-only mode
+
+`PASSBOLT_TOOLSETS=all` (default) or a comma list (see `passbolt://toolsets`); `PASSBOLT_TOOLS=a,b` adds single tools,
+`PASSBOLT_DISABLED_TOOLS=a,b` removes them, `PASSBOLT_READ_ONLY=1` removes every write/paid tool.
+
+## Example requests
+
+- Войди в админку example.com с паролем из Passbolt (без показа пароля).
+- Какие доступы лежат в папке клиента X?
+- Сделай ревизию дублей в Passbolt.
+- Заведи клиента Y: папка, доступы к CMS и хостингу, расшарь команде.
+- Проверь, что подключение к Passbolt работает.
+<!-- agent-block:end -->
+
 ## Access and limits
 
 Start with read-only access. Creating or updating entries and delivering secrets require separate permissions and server settings. The handler is configured by the operator; this project does not automatically fill every browser or application login form.

@@ -47,4 +47,4 @@ Homepage = "https://github.com/zai-one/passbolt-mcp"
 Issues = "https://github.com/zai-one/passbolt-mcp/issues"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "scripts", "contracts", "examples", "docs", "pyproject.toml", "uv.lock", "README.md", "README.ru.md", "INSTALL.md", "LICENSE", "NOTICE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "mcp.example.json", ".env.example", "SOURCE_PROVENANCE.json", "third_party", "vendor"]
+include = ["src", "skills", ".claude-plugin", "tests", "scripts", "contracts", "examples", "docs", "pyproject.toml", "uv.lock", "README.md", "README.ru.md", "INSTALL.md", "LICENSE", "NOTICE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "mcp.example.json", ".env.example", "SOURCE_PROVENANCE.json", "third_party", "vendor"]
