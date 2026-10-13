@@ -13,8 +13,8 @@ Secrets go only to operator-registered sinks (secure_fill, out_file, https_probe
 passbolt_search -> passbolt_select(target_url) -> passbolt_use_secret(selection_id, sink_ref).
 Never ask the user to paste a password; never print, log or summarise a secret; new secrets are \
 server_generated or sealed_ref.
-Update/share are approval-gated: the first call returns approval_id; the operator accepts it outside MCP \
-(passbolt-approval CLI); repeat the call with approval_id.
+Update/share are approval-gated: the first call returns approval_id; the operator accepts it outside MCP; \
+never accept it yourself; repeat the call with approval_id.
 Playbooks: skills passbolt-secret-handoff, passbolt-access-review, passbolt-onboard-client; or \
 passbolt://playbook, passbolt://guide/{security,sinks,errors}.
 Errors: retry only when retryable; policy denials are final."""
