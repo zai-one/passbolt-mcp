@@ -49,7 +49,10 @@ async def confirm_share(message: str, mode: str = "auto") -> str:
                 "Passbolt share requires MCP elicitation, but the client does not support it"
             )
         return "skipped"
-    result: Any = await ctx.elicit(message, response_type=None)  # type: ignore[union-attr]
+    try:
+        result: Any = await ctx.elicit(message, response_type=None)  # type: ignore[union-attr]
+    except Exception as exc:  # fail closed: a broken prompt never counts as consent
+        raise PermissionError("Passbolt share confirmation failed; nothing was shared") from exc
     action = getattr(result, "action", None)
     if action == "accept":
         return "accepted"

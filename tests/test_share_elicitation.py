@@ -42,3 +42,15 @@ async def test_off_and_bad_mode(monkeypatch):
     assert await el.confirm_share("m", "off") == "skipped"
     with pytest.raises(ValueError):
         await el.confirm_share("m", "maybe")
+
+
+async def test_elicitation_error_fails_closed(monkeypatch):
+    ctx = _ctx("accept")
+
+    async def boom(message, response_type=None):
+        raise RuntimeError("transport")
+
+    ctx.elicit = boom
+    monkeypatch.setattr(el, "get_context", lambda: ctx)
+    with pytest.raises(PermissionError):
+        await el.confirm_share("m")
