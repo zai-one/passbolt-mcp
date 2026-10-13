@@ -1,6 +1,6 @@
 {
   "name": "passbolt",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Passbolt vault access for agents: secrets go to sinks, never to the chat; agent skills included",
   "author": {
     "name": "ZAI.ONE",
@@ -15,7 +15,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp",
+        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.5.0",
         "passbolt-mcp"
       ],
       "env": {
