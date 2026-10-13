@@ -12,3 +12,9 @@ Use Issues for requested changes. Preserve LICENSE, NOTICE and third-party licen
 Never publish operational handoffs, private extraction refs, credentials or runtime state.
 Production deployment is a separate action.
 When operating in a workspace with a task/verifier protocol, follow that protocol.
+
+## Using this server from an agent
+
+Agent playbooks live in `skills/` (self-contained `SKILL.md` + `references/`/`templates/`), mirrored as MCP
+prompts and `passbolt://playbook` / `passbolt://guide/{topic}`. Keep `resources/guide/*.md` and copies inside
+skills identical (`scripts/token_budget.py` checks this and all size budgets).

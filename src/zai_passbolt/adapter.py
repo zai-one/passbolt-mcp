@@ -1372,6 +1372,40 @@ class PassboltAdapter:
             "description": metadata["description"],
         }
 
+    async def list_folders(self, *, allowed_folder_ids: frozenset[str] | None = None) -> dict[str, Any]:
+        """Folder metadata only (GET /folders.json): id, name, parent, personal. Never secrets.
+
+        v5 folder names live in encrypted metadata and are decrypted inside server custody.
+        """
+        payload = await self._request("GET", "/folders.json")
+        body = _unwrap(payload)
+        if isinstance(body, (str, bytes)) or not isinstance(body, Sequence):
+            raise ProviderResponseError("Passbolt folders response is not a list")
+        if len(body) > MAX_RESOURCE_SCAN:
+            raise ProviderResponseError("Passbolt folder scan exceeded the governed bound")
+        folders: list[dict[str, Any]] = []
+        for item in body:
+            if not isinstance(item, Mapping) or not item.get("id"):
+                continue
+            folder_id = str(item["id"])
+            if allowed_folder_ids is not None and folder_id not in allowed_folder_ids:
+                continue
+            name = item.get("name")
+            if not isinstance(name, str) and item.get("metadata"):
+                decrypted = await self._decrypt_metadata(item)
+                name = decrypted.get("name")
+            parent = item.get("folder_parent_id")
+            folders.append(
+                {
+                    "folder_id": folder_id,
+                    "name": name if isinstance(name, str) else None,
+                    "parent_id": str(parent) if parent else None,
+                    "personal": item.get("personal") is True,
+                }
+            )
+        folders.sort(key=lambda row: (str(row["name"] or "").lower(), row["folder_id"]))
+        return {"folders": folders, "count": len(folders), "secret_disclosed": False}
+
     async def _all_resources(self) -> list[dict[str, Any]]:
         payload = await self._request("GET", "/resources.json")
         body = _unwrap(payload)

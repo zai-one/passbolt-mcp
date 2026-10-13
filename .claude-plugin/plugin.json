@@ -1,0 +1,28 @@
+{
+  "name": "passbolt",
+  "version": "0.4.0",
+  "description": "Passbolt vault access for agents: secrets go to sinks, never to the chat; agent skills included",
+  "author": {
+    "name": "ZAI.ONE",
+    "url": "https://github.com/zai-one"
+  },
+  "homepage": "https://github.com/zai-one/passbolt-mcp",
+  "repository": "https://github.com/zai-one/passbolt-mcp",
+  "license": "LicenseRef-ZAI-ONE",
+  "skills": "./skills/",
+  "mcpServers": {
+    "passbolt": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp",
+        "passbolt-mcp"
+      ],
+      "env": {
+        "PASSBOLT_SECRET_FILE": "${PASSBOLT_SECRET_FILE}",
+        "PASSBOLT_BINDINGS_FILE": "${PASSBOLT_BINDINGS_FILE}",
+        "PASSBOLT_STATE_PATH": "${PASSBOLT_STATE_PATH}"
+      }
+    }
+  }
+}
