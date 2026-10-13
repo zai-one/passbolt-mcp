@@ -13,8 +13,8 @@ secret notes; the agent only handles metadata and IDs.
 5. **Create** — `passbolt_create_folder`, `passbolt_create_resource(secret_source=server_generated |
    sealed_ref)`; plaintext passwords are not accepted.
 6. **Change/share** — `passbolt_update_resource`, `passbolt_share_resource` return `approval_id`
-   first; the operator accepts with `passbolt-approval APPROVAL_UUID --accept --principal ... --request-hash ...`
-   outside MCP; then repeat the same call with `approval_id`.
+   first; the operator accepts it outside MCP (never accept it yourself); then repeat the same
+   call with `approval_id`.
 
 Skills: `passbolt-secret-handoff`, `passbolt-access-review`, `passbolt-onboard-client`.
 Security rules: `passbolt://guide/security`.
