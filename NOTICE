@@ -1,3 +1,5 @@
 ZAI.ONE-owned source uses LicenseRef-ZAI-ONE.
 Dependencies and separately installed provider software retain their own licenses.
 No code from the audited GitHub analogues was copied into this release.
+
+License history: this project has not been released under MIT. Releases before 2026-10-13 were published under LicenseRef-ZAI-ONE 1.0 and keep those terms; changes from 2026-10-13 onward use LicenseRef-ZAI-ONE 2.0 (see LICENSE).

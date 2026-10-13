@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- License: LicenseRef-ZAI-ONE 2.0 (source-available). Free install and use for yourself and your organisation, including commercial work; issues and pull requests welcome; copying code into other projects, redistribution, embedding and competing hosted services need written permission. Earlier releases keep their LicenseRef-ZAI-ONE 1.0 terms (see NOTICE). README first screen: one-line scope, why this MCP, maintenance and update check.
+
 - Agent layer: router `instructions` (≤1200 chars: secrets never in chat, sink flow, operator approvals), compact template descriptions and titles; all descriptions ASCII.
 - Toolsets `meta`, `read`, `use`, `write` (`PASSBOLT_TOOLSETS`, `PASSBOLT_TOOLS`, `PASSBOLT_DISABLED_TOOLS`, `PASSBOLT_READ_ONLY=1` = metadata reads only); `passbolt://toolsets`.
 - New read-only `passbolt_list_folders` (`GET /folders.json`; id, name, parent, personal; v5 names decrypted in custody; folder policy enforced).

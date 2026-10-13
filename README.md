@@ -4,6 +4,8 @@
 
 **Work with your password vault from your AI assistant.**
 
+> MCP server for the Passbolt password manager that lets an AI agent search, organise, share and use vault credentials without passwords ever entering the conversation.
+
 Find the right account, organise vault entries and prepare access for a colleague in the same conversation. Passbolt MCP connects your assistant to your vault and keeps passwords out of MCP responses. When a task needs a secret, the server delivers it to a handler you have configured.
 
 [Quick start](#quick-start) · [Connect your assistant](#connect-your-assistant) · [Issues](https://github.com/zai-one/passbolt-mcp/issues)
@@ -23,6 +25,20 @@ Try asking your assistant:
 | Diagnose setup locally | Check key usability, the server public key and your access policy before connecting to the vault. |
 
 The [protected endpoint walkthrough](docs/SECRET_PROBE.md) includes private configuration, example requests and the local `passbolt-mcp-doctor` command.
+
+## Why this MCP
+
+- No tool returns a password: secrets go only to operator-registered sinks (secure fill, file, HTTPS probe) and the assistant receives a status.
+- Toolsets (meta, read, use, write); `PASSBOLT_READ_ONLY=1` keeps metadata reads only; sharing follows an access policy.
+- Local `passbolt-mcp-doctor` checks keys and policy before connecting; supports Passbolt v5 resource types.
+- Other Passbolt MCP on GitHub ([mapix-etnc/passbolt-mcp-server](https://github.com/mapix-etnc/passbolt-mcp-server), AGPL) has no CI; [bitwarden/mcp-server](https://github.com/bitwarden/mcp-server) is the official option for Bitwarden, not Passbolt.
+
+## Maintained and up to date
+
+- Actively maintained by ZAI.ONE: current version 0.4.0; release notes in [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zai-one/passbolt-mcp/releases).
+- Built-in update check: ask the assistant to run `passbolt_check_update` (public GitHub API, no credentials, cached; nothing is installed automatically; `PASSBOLT_DISABLE_UPDATE_CHECK=1` turns it off).
+- Follows current MCP practice: tool annotations (read-only / destructive hints), toolsets and read-only mode, server `instructions`, prompts and resources, structured errors with recovery hints, secrets kept out of tool output, a token budget for tool descriptions enforced in tests.
+- CI runs the test suite on Linux and Windows for every pull request.
 
 ## Quick start
 
@@ -195,9 +211,9 @@ deployments. Set `PASSBOLT_DISABLE_UPDATE_CHECK=1` to turn it off, for example o
 
 [ZAI.ONE](https://zai.one) is a digital agency working on websites, SEO, advertising and analytics. We also build tools that connect AI assistants to everyday work. [Talk to us on Telegram](https://t.me/zai_one) about setup, automation or an integration for your team.
 
-## Use and feedback
+## License, use and contributing
 
-You may install and use this project for your own accounts under [LicenseRef-ZAI-ONE](LICENSE).
-This is not an open-source license. Third-party notices remain in [NOTICE](NOTICE).
-If it helps, give the repository a ⭐. Missing something or found a bug? [Open an issue](https://github.com/zai-one/passbolt-mcp/issues/new/choose).
-I'm working on this project; accepted improvements are implemented here. Support is not guaranteed.
+- **Use:** you may install and use this MCP server freely for yourself and your organisation, including commercial work. If it helps, please consider giving the repository a ⭐ — appreciated, never required.
+- **Contribute:** [issues](https://github.com/zai-one/passbolt-mcp/issues/new/choose) and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Never post tokens, cookies, sessions or account data.
+- **Not allowed without written permission from ZAI.ONE:** copying code into other projects, forking for redistribution, embedding the server in other products or offering it as a competing service.
+- License: [LicenseRef-ZAI-ONE 2.0](LICENSE) (source-available, not open source). Third-party notices and license history: [NOTICE](NOTICE).
