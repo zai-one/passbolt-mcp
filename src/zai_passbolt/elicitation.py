@@ -50,10 +50,19 @@ async def confirm_share(message: str, mode: str = "auto") -> str:
             )
         return "skipped"
     try:
-        result: Any = await ctx.elicit(message, response_type=None)  # type: ignore[union-attr]
+        # An explicit boolean field: an empty (response_type=None) form hangs or renders blank in some
+        # clients. Consent needs action=accept AND the box ticked (value is exactly True).
+        result: Any = await ctx.elicit(  # type: ignore[union-attr]
+            message,
+            response_type=bool,
+            response_title="Confirm share",
+            response_description="Tick to allow this Passbolt share",
+        )
     except Exception as exc:  # fail closed: a broken prompt never counts as consent
         raise PermissionError("Passbolt share confirmation failed; nothing was shared") from exc
     action = getattr(result, "action", None)
-    if action == "accept":
+    if action == "accept" and getattr(result, "data", None) is True:
         return "accepted"
+    if action == "accept":
+        raise PermissionError("Passbolt share was not confirmed by the user")
     raise PermissionError(f"Passbolt share was {action or 'not confirmed'} by the user")

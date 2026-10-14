@@ -29,6 +29,7 @@ from zai_passbolt.transport import (
     ProviderAuthenticationError,
     ProviderError,
     ProviderHttpError,
+    ProviderPreconditionFailed,
     ProviderResponseError,
 )
 
@@ -1946,18 +1947,7 @@ class PassboltAdapter:
         await self._request("PUT", f"/move/folder/{quote(fid)}.json", payload={"folder_parent_id": parent})
         return {"folder_id": fid, "parent_id": parent, "moved": True}
 
-    async def unshare(self, kind: str, target_id: str, aro_ids: list[str]) -> dict[str, Any]:
-        """Remove user/group permissions (PUT /share/{resource|folder}/{id}.json, {id, delete:true}).
-
-        Owner (type 15) permissions are never removed here, so the item cannot lose its last owner;
-        removing access needs no secrets. Resources are simulated first (share/simulate).
-        """
-        if kind not in {"resource", "folder"}:
-            raise ValueError("kind must be resource or folder")
-        tid = _uuid(target_id, f"{kind}_id")
-        wanted = {_uuid(item, "aro_id") for item in aro_ids}
-        if not wanted:
-            raise ValueError("aro_ids must name at least one user or group")
+    async def _target_permissions(self, kind: str, tid: str) -> list[Any]:
         if kind == "resource":
             body = _unwrap(await self._request("GET", f"/permissions/resource/{quote(tid)}.json"))
         else:
@@ -1967,6 +1957,25 @@ class PassboltAdapter:
             body = folder.get("permissions") if isinstance(folder, Mapping) else None
         if not isinstance(body, list):
             raise ProviderResponseError("Passbolt permissions response is not a list")
+        return body
+
+    async def unshare(self, kind: str, target_id: str, aro_ids: list[str]) -> dict[str, Any]:
+        """Remove user/group permissions (PUT /share/{resource|folder}/{id}.json, {id, delete:true}).
+
+        Owner (type 15) permissions are never selected for removal, so the item cannot lose its last
+        owner; removing access needs no secrets. Resources are simulated first (share/simulate).
+        Passbolt has no conditional permission update, so right before the PUT the permissions are
+        read again and the call is refused (ProviderPreconditionFailed, nothing sent) if a selected
+        permission is gone, moved to another user/group, or is now owner. A concurrent promotion in
+        the short window between that re-read and the PUT can still be removed.
+        """
+        if kind not in {"resource", "folder"}:
+            raise ValueError("kind must be resource or folder")
+        tid = _uuid(target_id, f"{kind}_id")
+        wanted = {_uuid(item, "aro_id") for item in aro_ids}
+        if not wanted:
+            raise ValueError("aro_ids must name at least one user or group")
+        body = await self._target_permissions(kind, tid)
         removals: list[dict[str, Any]] = []
         owners_kept = 0
         for item in body:
@@ -1981,6 +1990,17 @@ class PassboltAdapter:
         payload = {"permissions": removals}
         if kind == "resource":
             await self._request("POST", f"/share/simulate/resource/{quote(tid)}.json", payload=payload)
+        current = {
+            str(item.get("id")): item
+            for item in await self._target_permissions(kind, tid)
+            if isinstance(item, Mapping)
+        }
+        for removal in removals:
+            item = current.get(removal["id"])
+            if item is None or str(item.get("aro_foreign_key")) not in wanted or item.get("type") == 15:
+                raise ProviderPreconditionFailed(
+                    "Passbolt permissions changed during unshare; nothing was removed"
+                )
         await self._request("PUT", f"/share/{kind}/{quote(tid)}.json", payload={**payload, "secrets": []})
         return {f"{kind}_id": tid, "removed": len(removals), "owners_kept": owners_kept, "unshared": True}
 
