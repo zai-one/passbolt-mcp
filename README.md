@@ -50,7 +50,7 @@ Clients and `notifications/tools/list_changed` (verified against official docs, 
 
 ## Maintained and up to date
 
-- Actively maintained by ZAI.ONE: current version 0.5.0; release notes in [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zai-one/passbolt-mcp/releases).
+- Actively maintained by ZAI.ONE: current version 0.6.0; release notes in [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/zai-one/passbolt-mcp/releases).
 - Built-in update check: ask the assistant to run `passbolt_check_update` (public GitHub API, no credentials, cached; nothing is installed automatically; `PASSBOLT_DISABLE_UPDATE_CHECK=1` turns it off).
 - Follows current MCP practice: tool annotations (read-only / destructive hints), toolsets and read-only mode, server `instructions`, prompts and resources, structured errors with recovery hints, secrets kept out of tool output, a token budget for tool descriptions enforced in tests.
 - CI runs the test suite on Linux and Windows for every pull request.
@@ -118,13 +118,13 @@ reproducible installs; placeholders below are examples, keep secrets in files ou
 **Claude Code**
 
 ```bash
-claude mcp add passbolt --env PASSBOLT_SECRET_FILE=/path/to/passbolt.env --env PASSBOLT_BINDINGS_FILE=/path/to/bindings.json --env PASSBOLT_STATE_PATH=/path/to/passbolt.sqlite -- uvx --from "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.5.0" passbolt-mcp
+claude mcp add passbolt --env PASSBOLT_SECRET_FILE=/path/to/passbolt.env --env PASSBOLT_BINDINGS_FILE=/path/to/bindings.json --env PASSBOLT_STATE_PATH=/path/to/passbolt.sqlite -- uvx --from "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.6.0" passbolt-mcp
 ```
 
 Skills for Claude Code: copy `skills/*` into `~/.claude/skills/` (or install this repo as a plugin — it
 ships `.claude-plugin/plugin.json` with the skills and the MCP server).
 
-**Cursor** — `.cursor/mcp.json` ([one-click install](cursor://anysphere.cursor-deeplink/mcp/install?name=passbolt&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAiemFpLXBhc3Nib2x0LW1jcFtzdGFuZGFsb25lXSBAIGdpdCtodHRwczovL2dpdGh1Yi5jb20vemFpLW9uZS9wYXNzYm9sdC1tY3BAdjAuNS4wIiwgInBhc3Nib2x0LW1jcCJdLCAiZW52IjogeyJQQVNTQk9MVF9TRUNSRVRfRklMRSI6ICIvcGF0aC90by9wYXNzYm9sdC5lbnYiLCAiUEFTU0JPTFRfQklORElOR1NfRklMRSI6ICIvcGF0aC90by9iaW5kaW5ncy5qc29uIiwgIlBBU1NCT0xUX1NUQVRFX1BBVEgiOiAiL3BhdGgvdG8vcGFzc2JvbHQuc3FsaXRlIn19)):
+**Cursor** — `.cursor/mcp.json` ([one-click install](cursor://anysphere.cursor-deeplink/mcp/install?name=passbolt&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAiemFpLXBhc3Nib2x0LW1jcFtzdGFuZGFsb25lXSBAIGdpdCtodHRwczovL2dpdGh1Yi5jb20vemFpLW9uZS9wYXNzYm9sdC1tY3BAdjAuNi4wIiwgInBhc3Nib2x0LW1jcCJdLCAiZW52IjogeyJQQVNTQk9MVF9TRUNSRVRfRklMRSI6ICIvcGF0aC90by9wYXNzYm9sdC5lbnYiLCAiUEFTU0JPTFRfQklORElOR1NfRklMRSI6ICIvcGF0aC90by9iaW5kaW5ncy5qc29uIiwgIlBBU1NCT0xUX1NUQVRFX1BBVEgiOiAiL3BhdGgvdG8vcGFzc2JvbHQuc3FsaXRlIn19)):
 
 ```json
 {
@@ -133,7 +133,7 @@ ships `.claude-plugin/plugin.json` with the skills and the MCP server).
       "command": "uvx",
       "args": [
         "--from",
-        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.5.0",
+        "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.6.0",
         "passbolt-mcp"
       ],
       "env": {
@@ -152,7 +152,7 @@ repo's `.agents/skills` link):
 ```toml
 [mcp_servers.passbolt]
 command = "uvx"
-args = ["--from", "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.5.0", "passbolt-mcp"]
+args = ["--from", "zai-passbolt-mcp[standalone] @ git+https://github.com/zai-one/passbolt-mcp@v0.6.0", "passbolt-mcp"]
 env = { PASSBOLT_SECRET_FILE = "/path/to/passbolt.env", PASSBOLT_BINDINGS_FILE = "/path/to/bindings.json", PASSBOLT_STATE_PATH = "/path/to/passbolt.sqlite" }
 ```
 

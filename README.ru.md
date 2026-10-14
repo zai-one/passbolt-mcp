@@ -50,7 +50,7 @@
 
 ## Поддержка и обновления
 
-- Проект активно поддерживает ZAI.ONE: текущая версия 0.5.0; изменения в [CHANGELOG.md](CHANGELOG.md) и [Releases](https://github.com/zai-one/passbolt-mcp/releases).
+- Проект активно поддерживает ZAI.ONE: текущая версия 0.6.0; изменения в [CHANGELOG.md](CHANGELOG.md) и [Releases](https://github.com/zai-one/passbolt-mcp/releases).
 - Встроенная проверка обновлений: попросите ассистента вызвать `passbolt_check_update` (публичный GitHub API, без учётных данных, с кэшем; ничего не устанавливается автоматически; отключение: `PASSBOLT_DISABLE_UPDATE_CHECK=1`).
 - Следует актуальным практикам MCP: аннотации инструментов (read-only / destructive), наборы инструментов и режим только чтения, `instructions` сервера, промпты и ресурсы, структурированные ошибки с подсказками, секреты не попадают в ответы, бюджет токенов описаний проверяется в тестах.
 - CI прогоняет тесты на Linux и Windows для каждого pull request.
