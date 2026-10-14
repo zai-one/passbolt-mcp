@@ -20,9 +20,10 @@ Skills: `passbolt-secret-handoff`, `passbolt-access-review`, `passbolt-onboard-c
 Security rules: `passbolt://guide/security`.
 
 Sharing: every approved share (`passbolt_share_resource`, create with `share_with_*`) also asks the user
-through MCP elicitation when the client supports it (`PASSBOLT_SHARE_ELICITATION=auto|required|off`).
+through MCP elicitation when the client supports it (`PASSBOLT_SHARE_ELICITATION=auto|required|off`,
+default `auto`: no prompt if the client cannot elicit).
 Opt-in `directory` toolset (`PASSBOLT_TOOLSETS=default,directory`): `passbolt_directory` lists group/user
-UUIDs for sharing or who can access one resource. Opt-in `organize`: `passbolt_move_resource`
-(approval-gated move into a folder or root; folder policy applies).
+UUIDs for sharing or who can access one resource. Opt-in `organize` (all approval-gated): `passbolt_move_resource`
+(folder or root; folder policy applies), `passbolt_move_folder`, `passbolt_unshare` (never removes owners).
 Guides: `passbolt://guide/security`, `passbolt://guide/sinks`, `passbolt://guide/errors`,
 `passbolt://guide/tool-map`. Errors: retry only when retryable; policy denials are final.

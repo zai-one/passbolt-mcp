@@ -3,17 +3,17 @@
 
 ## Unreleased
 
-- `passbolt_move_folder` (PUT /move/folder) and `passbolt_unshare` (share `{id, delete:true}`, owners kept, simulate first) in the opt-in `organize` toolset, both approval-gated.
+- `passbolt_move_folder` (PUT /move/folder) and `passbolt_unshare` (share `{id, delete:true}`, owner permissions kept, resources simulated first) in the opt-in `organize` toolset, both approval-gated.
 
 - Shares now ask the user through MCP elicitation right before an approved share executes
   (`passbolt_share_resource`, create resource/folder with `share_with_*`); decline/cancel aborts and is
-  audited. `PASSBOLT_SHARE_ELICITATION=auto|required|off` (default `auto`). Operator approval still required.
+  audited. `PASSBOLT_SHARE_ELICITATION=auto|required|off` (default `auto`: prompt only when the client supports elicitation). Operator approval still required.
 - Elicitation is shown only for a valid accepted approval that matches the exact request (operation +
   arguments digest); otherwise no prompt and the write is refused as before.
 - Opt-in `organize` toolset: `passbolt_move_resource` (approval-gated move to a folder or root).
 - Opt-in `directory` toolset: `passbolt_directory` (group/user UUIDs for sharing; per-resource permissions).
 - Router generated from `ROUTES` with tool/skill/guide per line and playbook + `guide/tool-map` fallback.
-- Router eval: 18 RU/EN requests; fails on any unreachable tool, skill or guide.
+- Router eval: 23 RU/EN requests (paraphrases, negative cases); fails on any unreachable tool, skill or guide.
 ## 0.5.0
 
 - License: LicenseRef-ZAI-ONE 2.0 (source-available). Free install and use for yourself and your organisation, including commercial work; issues and pull requests welcome; copying code into other projects, redistribution, embedding and competing hosted services need written permission. Earlier releases keep their LicenseRef-ZAI-ONE 1.0 terms (see NOTICE). README first screen: one-line scope, why this MCP, maintenance and update check.
