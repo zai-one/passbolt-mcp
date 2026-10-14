@@ -1930,6 +1930,121 @@ class PassboltAdapter:
             ],
         )
 
+    async def move_resource(self, resource_id: str, folder_id: str | None) -> dict[str, Any]:
+        """Move one resource into a folder, or to the root when folder_id is None (PUT /move/resource)."""
+        rid = _uuid(resource_id, "resource_id")
+        parent = _uuid(folder_id, "folder_id") if folder_id is not None else None
+        await self._request("PUT", f"/move/resource/{quote(rid)}.json", payload={"folder_parent_id": parent})
+        return {"resource_id": rid, "folder_id": parent, "moved": True}
+
+    async def move_folder(self, folder_id: str, parent_id: str | None) -> dict[str, Any]:
+        """Move one folder under another folder or to the root (PUT /move/folder/{id}.json)."""
+        fid = _uuid(folder_id, "folder_id")
+        parent = _uuid(parent_id, "parent_id") if parent_id is not None else None
+        if parent == fid:
+            raise ValueError("a folder cannot be moved into itself")
+        await self._request("PUT", f"/move/folder/{quote(fid)}.json", payload={"folder_parent_id": parent})
+        return {"folder_id": fid, "parent_id": parent, "moved": True}
+
+    async def unshare(self, kind: str, target_id: str, aro_ids: list[str]) -> dict[str, Any]:
+        """Remove user/group permissions (PUT /share/{resource|folder}/{id}.json, {id, delete:true}).
+
+        Owner (type 15) permissions are never removed here, so the item cannot lose its last owner;
+        removing access needs no secrets. Resources are simulated first (share/simulate).
+        """
+        if kind not in {"resource", "folder"}:
+            raise ValueError("kind must be resource or folder")
+        tid = _uuid(target_id, f"{kind}_id")
+        wanted = {_uuid(item, "aro_id") for item in aro_ids}
+        if not wanted:
+            raise ValueError("aro_ids must name at least one user or group")
+        if kind == "resource":
+            body = _unwrap(await self._request("GET", f"/permissions/resource/{quote(tid)}.json"))
+        else:
+            folder = _unwrap(
+                await self._request("GET", f"/folders/{quote(tid)}.json", params={"contain[permissions]": 1})
+            )
+            body = folder.get("permissions") if isinstance(folder, Mapping) else None
+        if not isinstance(body, list):
+            raise ProviderResponseError("Passbolt permissions response is not a list")
+        removals: list[dict[str, Any]] = []
+        owners_kept = 0
+        for item in body:
+            if not isinstance(item, Mapping) or str(item.get("aro_foreign_key")) not in wanted:
+                continue
+            if item.get("type") == 15:
+                owners_kept += 1
+                continue
+            removals.append({"id": str(item.get("id")), "delete": True})
+        if not removals:
+            return {f"{kind}_id": tid, "removed": 0, "owners_kept": owners_kept, "unshared": False}
+        payload = {"permissions": removals}
+        if kind == "resource":
+            await self._request("POST", f"/share/simulate/resource/{quote(tid)}.json", payload=payload)
+        await self._request("PUT", f"/share/{kind}/{quote(tid)}.json", payload={**payload, "secrets": []})
+        return {f"{kind}_id": tid, "removed": len(removals), "owners_kept": owners_kept, "unshared": True}
+
+    async def list_directory(self, *, group_ids: frozenset[str], user_ids: frozenset[str]) -> dict[str, Any]:
+        """Share-target directory: group/user UUIDs with display names; emails are not returned.
+
+        Only the share targets this binding's policy allows are returned (``group_ids``/``user_ids``);
+        everyone else in the vault stays invisible, exactly like the share tools' own allowlist.
+        """
+        groups, users = await self._directory()
+
+        def allowed(item: Mapping[str, Any], ids: frozenset[str]) -> bool:
+            try:
+                return str(UUID(str(item.get("id")))) in ids
+            except ValueError:
+                return False
+
+        groups = [g for g in groups if allowed(g, group_ids)]
+        users = [u for u in users if allowed(u, user_ids)]
+        profile = lambda u: u.get("profile") if isinstance(u.get("profile"), Mapping) else {}  # noqa: E731
+        return {
+            "groups": [
+                {
+                    "group_id": str(g.get("id")),
+                    "name": g.get("name"),
+                    "members": len(g.get("groups_users") or []),
+                }
+                for g in groups
+            ][:MAX_RESOURCE_SCAN],
+            "users": [
+                {
+                    "user_id": str(u.get("id")),
+                    "name": " ".join(
+                        str(part)
+                        for part in (profile(u).get("first_name"), profile(u).get("last_name"))
+                        if part
+                    ),
+                    "role": (u.get("role") or {}).get("name") if isinstance(u.get("role"), Mapping) else None,
+                }
+                for u in users
+            ][:MAX_RESOURCE_SCAN],
+        }
+
+    async def resource_permissions(self, resource_id: str) -> dict[str, Any]:
+        """Who can access one resource (GET /permissions/resource/{id}.json). Metadata only."""
+        rid = str(UUID(str(resource_id)))
+        payload = await self._request("GET", f"/permissions/resource/{rid}.json")
+        body = _unwrap(payload)
+        if not isinstance(body, list):
+            raise ProviderResponseError("Passbolt permissions response is not a list")
+        levels = {1: "read", 7: "update", 15: "owner"}
+        return {
+            "resource_id": rid,
+            "permissions": [
+                {
+                    "aro": item.get("aro"),
+                    "aro_id": str(item.get("aro_foreign_key")),
+                    "permission": levels.get(item.get("type"), item.get("type")),
+                }
+                for item in body
+                if isinstance(item, Mapping)
+            ],
+        }
+
     async def all_share_user_ids(self) -> list[str]:
         """Resolve all active users in this vault at approval-preparation time.
 

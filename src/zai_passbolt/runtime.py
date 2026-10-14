@@ -33,6 +33,9 @@ WRITE_TOOLS = frozenset(
         "passbolt_update_resource",
         "passbolt_create_folder",
         "passbolt_share_resource",
+        "passbolt_move_resource",
+        "passbolt_move_folder",
+        "passbolt_unshare",
     }
 )
 

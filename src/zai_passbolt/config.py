@@ -25,6 +25,7 @@ class ServiceConfig:
     audience: str = "passbolt-mcp"
     local_scopes: frozenset[str] = frozenset({"passbolt:read"})
     passbolt_write_enabled: bool = False
+    passbolt_share_elicitation: str = "auto"
     passbolt_use_enabled: bool = False
     passbolt_selection_ttl_seconds: int = 600
     enabled: bool = True
@@ -51,6 +52,9 @@ class ServiceConfig:
             for v in (self.enabled, self.passbolt_write_enabled, self.passbolt_use_enabled)
         ):
             raise ValueError("boolean runtime policy required")
+        if self.passbolt_share_elicitation not in {"auto", "required", "off"}:
+            # Fail at startup, not on the first approved share.
+            raise ValueError("PASSBOLT_SHARE_ELICITATION must be auto, required or off")
         copied = dict(self.bindings)
         if any(
             not isinstance(actor, str)
@@ -90,6 +94,7 @@ class ServiceConfig:
             audience=os.environ.get("PASSBOLT_MCP_AUDIENCE", "passbolt-mcp"),
             local_scopes=frozenset(os.environ.get("PASSBOLT_LOCAL_SCOPES", "passbolt:read").split()),
             passbolt_write_enabled=flag("PASSBOLT_WRITE_ENABLED"),
+            passbolt_share_elicitation=os.environ.get("PASSBOLT_SHARE_ELICITATION", "auto").strip().lower(),
             passbolt_use_enabled=flag("PASSBOLT_USE_ENABLED"),
             enabled=flag("PASSBOLT_ENABLED", "true"),
             rate_limit=int(os.environ.get("PASSBOLT_RATE_LIMIT", "10")),

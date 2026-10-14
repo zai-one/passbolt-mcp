@@ -77,6 +77,15 @@ def _required(prompt: str, *, hidden: bool = False) -> str:
     return value
 
 
+def _tool_loading() -> str:
+    """Ask eager vs lazy tool loading; anything but lazy keeps the eager default."""
+    answer = input(
+        "Tool loading: eager = every tool at start (default), lazy = small core, enable toolsets on "
+        "demand; needs a client with tools/list_changed [eager/lazy]: "
+    )
+    return "lazy" if answer.strip().lower() in {"lazy", "l"} else "eager"
+
+
 def configure(directory: Path) -> Path:
     """Create new local files only; never modify existing client or provider settings."""
     root = directory.expanduser().resolve()
@@ -113,6 +122,7 @@ def configure(directory: Path) -> Path:
             values[key] = str(source.resolve())
         else:
             values[key] = _required(key + ": ")
+    values[f"{SERVICE.upper()}_TOOL_LOADING"] = _tool_loading()
     root.mkdir(parents=True, exist_ok=True)
     _private_directory(root / "secrets")
     for path, value in pending.items():

@@ -359,3 +359,190 @@ async def test_update_accepts_policy_uri_or_primary_uri_removal(config, uri):
     assert (await call("passbolt_update_resource", **args, approval_id=approval))["updated"]
     [(kind, kwargs)] = adapter.calls
     assert kind == "update" and kwargs["fields"]["uri"] == uri
+
+
+async def test_share_elicitation_only_for_valid_matching_approval(config, monkeypatch):
+    from zai_passbolt import tools as tools_mod
+
+    asked = []
+
+    async def fake_confirm(message, mode="auto"):
+        asked.append(message)
+        return "accepted"
+
+    monkeypatch.setattr(tools_mod, "confirm_share", fake_confirm)
+    adapter = FixtureAdapter()
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE, "permission": "read", "idempotency_key": "s1", "users": [RESOURCE]}
+    prepared = await call("passbolt_share_resource", **args)
+    assert not asked and not adapter.calls
+    # Prepared but not accepted, or a random id: no prompt, and the write is refused.
+    for bogus in (prepared["approval_id"], str(uuid4()), "not-a-uuid"):
+        with pytest.raises(SafeToolError):
+            await call("passbolt_share_resource", **args, approval_id=bogus)
+    assert not asked and not adapter.calls
+    approval = await approve(runtime, prepared)
+    # Accepted approval but a different request (other permission): no prompt, refused.
+    with pytest.raises(SafeToolError):
+        await call("passbolt_share_resource", **{**args, "permission": "update"}, approval_id=approval)
+    assert not asked
+    result = await call("passbolt_share_resource", **args, approval_id=approval)
+    assert result["shared"] and result["elicitation"] == "accepted" and len(asked) == 1
+
+
+async def test_move_resource_is_approval_gated(config):
+    adapter = FixtureAdapter()
+    moved = []
+
+    async def move_resource(resource_id, folder_id):
+        moved.append((resource_id, folder_id))
+        return {"resource_id": resource_id, "folder_id": folder_id, "moved": True}
+
+    adapter.move_resource = move_resource
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE, "idempotency_key": "m1"}
+    prepared = await call("passbolt_move_resource", **args)
+    assert prepared["confirmation_required"] and not moved
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_resource", **args, approval_id=approval))["moved"]
+    assert moved == [(RESOURCE, None)]
+
+
+async def test_move_and_directory_normalize_resource_uuid(config):
+    adapter = FixtureAdapter()
+    moved = []
+    perms = []
+
+    async def move_resource(resource_id, folder_id):
+        moved.append(resource_id)
+        return {"resource_id": resource_id, "folder_id": folder_id, "moved": True}
+
+    async def resource_permissions(resource_id):
+        perms.append(resource_id)
+        return {"resource_id": resource_id, "permissions": []}
+
+    adapter.move_resource = move_resource
+    adapter.resource_permissions = resource_permissions
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE.upper(), "idempotency_key": "m2"}
+    prepared = await call("passbolt_move_resource", **args)
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_resource", **args, approval_id=approval))["moved"]
+    assert moved == [RESOURCE]
+    await call("passbolt_directory", resource_id=RESOURCE.upper())
+    assert perms == [RESOURCE]
+    with pytest.raises(SafeToolError):
+        await call("passbolt_directory", resource_id="not-a-uuid")
+
+
+async def test_move_folder_and_unshare_are_approval_gated(config):
+    adapter = FixtureAdapter()
+    done = []
+
+    async def move_folder(folder_id, parent_id):
+        done.append(("move", folder_id, parent_id))
+        return {"folder_id": folder_id, "parent_id": parent_id, "moved": True}
+
+    async def unshare(kind, target_id, aro_ids):
+        done.append(("unshare", kind, target_id, tuple(aro_ids)))
+        return {"resource_id": target_id, "removed": 1, "owners_kept": 0, "unshared": True}
+
+    adapter.move_folder = move_folder
+    adapter.unshare = unshare
+    runtime, call = harness(config, adapter)
+    margs = {"folder_id": RESOURCE.upper(), "idempotency_key": "f1"}
+    prepared = await call("passbolt_move_folder", **margs)
+    assert prepared["confirmation_required"] and not done
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_folder", **margs, approval_id=approval))["moved"]
+    uargs = {"kind": "resource", "target_id": RESOURCE, "aro_ids": [RESOURCE], "idempotency_key": "u1"}
+    prepared = await call("passbolt_unshare", **uargs)
+    assert prepared["confirmation_required"]
+    approval = await approve(runtime, prepared)
+    with pytest.raises(SafeToolError):  # approval is bound to the exact request
+        await call("passbolt_unshare", **{**uargs, "kind": "folder"}, approval_id=approval)
+    assert (await call("passbolt_unshare", **uargs, approval_id=approval))["unshared"]
+    assert done == [("move", RESOURCE, None), ("unshare", "resource", RESOURCE, (RESOURCE,))]
+    with pytest.raises(SafeToolError):
+        await call(
+            "passbolt_unshare", kind="resource", target_id=RESOURCE, aro_ids=["x"], idempotency_key="u2"
+        )
+
+
+async def test_adapter_move_folder_and_unshare_follow_api_v5(monkeypatch):
+    adapter = PassboltAdapter.__new__(PassboltAdapter)
+    sent = []
+    owner, reader = str(uuid4()), str(uuid4())
+
+    async def fake_request(method, path, payload=None, params=None, **_):
+        sent.append((method, path, payload))
+        if path.startswith("/permissions/resource/"):
+            return {
+                "body": [
+                    {"id": "p-owner", "aro_foreign_key": owner, "type": 15},
+                    {"id": "p-read", "aro_foreign_key": reader, "type": 1},
+                ]
+            }
+        return {"body": {}}
+
+    adapter._request = fake_request
+    out = await adapter.move_folder(RESOURCE, None)
+    assert sent[-1] == ("PUT", f"/move/folder/{RESOURCE}.json", {"folder_parent_id": None}) and out["moved"]
+    with pytest.raises(ValueError):
+        await adapter.move_folder(RESOURCE, RESOURCE)
+    sent.clear()
+    out = await adapter.unshare("resource", RESOURCE, [owner, reader])
+    assert out == {"resource_id": RESOURCE, "removed": 1, "owners_kept": 1, "unshared": True}
+    assert sent[1] == (
+        "POST",
+        f"/share/simulate/resource/{RESOURCE}.json",
+        {"permissions": [{"id": "p-read", "delete": True}]},
+    )
+    assert sent[2] == (
+        "PUT",
+        f"/share/resource/{RESOURCE}.json",
+        {"permissions": [{"id": "p-read", "delete": True}], "secrets": []},
+    )
+
+
+async def test_directory_tool_scopes_listing_to_binding_share_targets(config):
+    adapter = FixtureAdapter()
+    asked = []
+
+    async def list_directory(*, group_ids, user_ids):
+        asked.append((group_ids, user_ids))
+        return {"groups": [], "users": []}
+
+    adapter.list_directory = list_directory
+    _runtime, call = harness(config, adapter)
+    await call("passbolt_directory")
+    policy = adapter.access_policy("default")
+    assert asked == [(policy.group_ids, policy.user_ids)]
+
+
+async def test_organize_failures_are_audited(config):
+    import json
+    import sqlite3
+
+    adapter = FixtureAdapter()
+
+    async def broken(*_args):
+        raise ProviderError("vault down")
+
+    adapter.move_folder = broken
+    adapter.unshare = broken
+    runtime, call = harness(config, adapter)
+    for tool, args in (
+        ("passbolt_move_folder", {"folder_id": RESOURCE, "idempotency_key": "fail-f"}),
+        (
+            "passbolt_unshare",
+            {"kind": "resource", "target_id": RESOURCE, "aro_ids": [RESOURCE], "idempotency_key": "fail-u"},
+        ),
+    ):
+        approval = await approve(runtime, await call(tool, **args))
+        with pytest.raises(SafeToolError):
+            await call(tool, **args, approval_id=approval)
+    with sqlite3.connect(config.state_path) as db:
+        rows = [json.loads(data) for (data,) in db.execute("SELECT data FROM passbolt_audit")]
+    errors = {(row["action"], row["outcome"]) for row in rows if row["outcome"] == "error"}
+    assert errors == {("move_folder", "error"), ("unshare", "error")}

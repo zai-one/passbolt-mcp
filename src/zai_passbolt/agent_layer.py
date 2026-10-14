@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
 
+from . import lazy_loading
+
 INSTRUCTIONS_LIMIT = 1200
 DESCRIPTION_LIMIT = 300
 ALWAYS_ON = "meta"
@@ -26,6 +28,31 @@ class Prompt:
 
 
 @dataclass(frozen=True)
+class Route:
+    """One router line: casual intent words -> first tool; skill; guide topic."""
+
+    id: str
+    intent: str
+    tool: str
+    skill: str
+    topic: str
+
+
+def build_router(service: str, header: str, routes: tuple[Route, ...], footer: str = "") -> str:
+    """Compose router instructions: header, one line per intent, footer, docs + playbook fallback."""
+    lines = [header.strip(), f"Intent -> first tool; skill; {service}://guide/<topic>:"]
+    for route in routes:
+        parts = (route.tool, route.skill, route.topic)
+        lines.append(f"- {route.intent}: " + "; ".join(part for part in parts if part))
+    if footer:
+        lines.append(footer.strip())
+    lines.append(
+        f"Unsure? {service}://playbook (flows, skills) or {service}://guide/tool-map (every tool, toolsets)."
+    )
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
 class Profile:
     service: str  # uri scheme and env prefix source, e.g. "topvisor"
     package: str  # python package holding resources/guide/*.md
@@ -34,6 +61,9 @@ class Profile:
     toolsets: Mapping[str, tuple[str, ...]]
     prompts: tuple[Prompt, ...] = ()
     titles: Mapping[str, str] = field(default_factory=dict)
+    routes: tuple[Route, ...] = ()
+    optin: tuple[str, ...] = ()  # heavy/rare toolsets: only with <ENV>_TOOLSETS=all or by name
+    lazy_core: tuple[str, ...] = ()  # entry tools listed at start with <ENV>_TOOL_LOADING=lazy
 
     @property
     def env(self) -> str:
@@ -57,9 +87,11 @@ def selected_tools(
     profile: Profile, names: set[str], read_only_names: set[str], environ: Mapping[str, str] | None = None
 ) -> set[str]:
     env = os.environ if environ is None else environ
-    requested = _split(env.get(f"{profile.env}_TOOLSETS")) or {"all"}
-    if "all" in requested or "default" in requested:
+    requested = _split(env.get(f"{profile.env}_TOOLSETS")) or {"default"}
+    if "all" in requested:
         requested = set(profile.toolsets)
+    elif "default" in requested:
+        requested = (requested - {"default"}) | (set(profile.toolsets) - set(profile.optin))
     unknown = requested - set(profile.toolsets)
     if unknown:
         raise ValueError(f"unknown {profile.env}_TOOLSETS: {', '.join(sorted(unknown))}")
@@ -97,6 +129,7 @@ def apply(server: Any, profile: Profile, environ: Mapping[str, str] | None = Non
             tool.description = profile.descriptions[name]
         if not tool.title:
             tool.title = profile.titles.get(name) or _title(profile.service, name)
+    lazy_loading.install(server, profile, keep, environ)
     _register_resources(server, profile, keep)
     _register_prompts(server, profile)
     return keep
@@ -110,8 +143,10 @@ def _title(service: str, name: str) -> str:
 def toolsets_markdown(profile: Profile, active: set[str]) -> str:
     lines = [
         f"# {profile.service} toolsets",
-        f"Select with {profile.env}_TOOLSETS=all|<a,b>; add tools with {profile.env}_TOOLS; "
-        f"drop with {profile.env}_DISABLED_TOOLS; {profile.env}_READ_ONLY=1 removes every write tool.",
+        f"Select with {profile.env}_TOOLSETS=default|all|<a,b> "
+        f"(opt-in: {', '.join(profile.optin) or 'none'}); add tools with {profile.env}_TOOLS; "
+        f"drop with {profile.env}_DISABLED_TOOLS; {profile.env}_READ_ONLY=1 removes every write tool; "
+        f"{profile.env}_TOOL_LOADING=lazy lists only core tools until {profile.service}_enable_toolsets.",
         "",
     ]
     for toolset, names in profile.toolsets.items():
@@ -120,8 +155,30 @@ def toolsets_markdown(profile: Profile, active: set[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def tool_map(profile: Profile) -> str:
+    """Fuller docs behind the router: every tool by toolset with its description."""
+    lines = [
+        f"# {profile.service} tool map",
+        f"Toolsets marked opt-in need {profile.env}_TOOLSETS=all or by name.",
+        "",
+    ]
+    for toolset, names in profile.toolsets.items():
+        lines.append(f"## {toolset}" + (" (opt-in)" if toolset in profile.optin else ""))
+        for name in names:
+            desc = profile.descriptions.get(name, "")
+            lines.append(f"- `{name}`: {desc.split('. ')[0]}" if desc else f"- `{name}`")
+        lines.append("")
+    if profile.routes:
+        lines.append("## Router intents")
+        for route in profile.routes:
+            tool = route.tool or "-"
+            lines.append(f"- {route.intent} -> `{tool}`; skill {route.skill or '-'}; guide {route.topic}")
+    return "\n".join(lines) + "\n"
+
+
 def _register_resources(server: Any, profile: Profile, active: set[str]) -> None:
     topics = guide_topics(profile)
+    topics.setdefault("tool-map", tool_map(profile))
     scheme = profile.service
 
     def reader(text: str) -> Callable[[], str]:
