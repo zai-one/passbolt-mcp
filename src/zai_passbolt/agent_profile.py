@@ -104,4 +104,5 @@ PROFILE = Profile(
     prompts=PROMPTS,
     routes=ROUTES,
     optin=OPTIN,
+    lazy_core=("passbolt_search",),
 )

@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
 
+from . import lazy_loading
+
 INSTRUCTIONS_LIMIT = 1200
 DESCRIPTION_LIMIT = 300
 ALWAYS_ON = "meta"
@@ -61,6 +63,7 @@ class Profile:
     titles: Mapping[str, str] = field(default_factory=dict)
     routes: tuple[Route, ...] = ()
     optin: tuple[str, ...] = ()  # heavy/rare toolsets: only with <ENV>_TOOLSETS=all or by name
+    lazy_core: tuple[str, ...] = ()  # entry tools listed at start with <ENV>_TOOL_LOADING=lazy
 
     @property
     def env(self) -> str:
@@ -126,6 +129,7 @@ def apply(server: Any, profile: Profile, environ: Mapping[str, str] | None = Non
             tool.description = profile.descriptions[name]
         if not tool.title:
             tool.title = profile.titles.get(name) or _title(profile.service, name)
+    lazy_loading.install(server, profile, keep, environ)
     _register_resources(server, profile, keep)
     _register_prompts(server, profile)
     return keep
@@ -141,7 +145,8 @@ def toolsets_markdown(profile: Profile, active: set[str]) -> str:
         f"# {profile.service} toolsets",
         f"Select with {profile.env}_TOOLSETS=default|all|<a,b> "
         f"(opt-in: {', '.join(profile.optin) or 'none'}); add tools with {profile.env}_TOOLS; "
-        f"drop with {profile.env}_DISABLED_TOOLS; {profile.env}_READ_ONLY=1 removes every write tool.",
+        f"drop with {profile.env}_DISABLED_TOOLS; {profile.env}_READ_ONLY=1 removes every write tool; "
+        f"{profile.env}_TOOL_LOADING=lazy lists only core tools until {profile.service}_enable_toolsets.",
         "",
     ]
     for toolset, names in profile.toolsets.items():
