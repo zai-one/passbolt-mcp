@@ -38,8 +38,8 @@ DESCRIPTIONS = {
     "returns approval_id; operator accepts outside MCP.",
     "passbolt_unshare": "Remove user/group access to a resource or folder; owners are kept "
     "(approval-gated). First call returns approval_id; operator accepts outside MCP.",
-    "passbolt_directory": "List group/user UUIDs for sharing, or who can access one resource. Use before "
-    "share or in access reviews. Metadata only; no emails, never secrets.",
+    "passbolt_directory": "List the group/user UUIDs this binding may share with, or who can access one "
+    "resource. Use before share or in access reviews. Metadata only; no emails, never secrets.",
     "passbolt_local_diagnostics": "Check local key usability and binding policy. Use when setup fails; "
     "vault auth via `passbolt_status`. Cost: no vault call; never returns secrets.",
     "passbolt_status": "Probe Passbolt auth and a v5 decrypt canary. Use before first real task. "

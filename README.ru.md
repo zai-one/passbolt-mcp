@@ -133,7 +133,7 @@ uv run --frozen --extra standalone python scripts/verify_install.py
 
 ## Подтверждение шаринга и opt-in наборы
 
-Прямо перед выполнением одобренного шаринга сервер спрашивает пользователя через MCP elicitation. `PASSBOLT_SHARE_ELICITATION`: `auto` (по умолчанию) спрашивает, только если клиент поддерживает elicitation, иначе достаточно подтверждения оператора; `required` отказывает, если клиент не умеет спрашивать; `off` отключает вопрос. Подтверждение оператора нужно всегда. `PASSBOLT_TOOLSETS=default,directory,organize` добавляет `passbolt_directory` (UUID групп и пользователей с именами, без email; права на ресурс) и, с подтверждением оператора, `passbolt_move_resource`, `passbolt_move_folder`, `passbolt_unshare` (снимает права пользователей и групп, права владельца не трогает). Карта инструментов: `passbolt://guide/tool-map`.
+Прямо перед выполнением одобренного шаринга сервер спрашивает пользователя через MCP elicitation. `PASSBOLT_SHARE_ELICITATION`: `auto` (по умолчанию) спрашивает, только если клиент поддерживает elicitation, иначе достаточно подтверждения оператора; `required` отказывает, если клиент не умеет спрашивать; `off` отключает вопрос. Подтверждение оператора нужно всегда. `PASSBOLT_TOOLSETS=default,directory,organize` добавляет `passbolt_directory` (UUID и имена групп и пользователей, разрешённых политикой привязки для шаринга, без email; права на ресурс) и, с подтверждением оператора, `passbolt_move_resource`, `passbolt_move_folder`, `passbolt_unshare` (снимает права пользователей и групп, права владельца не трогает). Карта инструментов: `passbolt://guide/tool-map`.
 
 ## Обновления
 

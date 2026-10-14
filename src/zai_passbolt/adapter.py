@@ -1984,9 +1984,22 @@ class PassboltAdapter:
         await self._request("PUT", f"/share/{kind}/{quote(tid)}.json", payload={**payload, "secrets": []})
         return {f"{kind}_id": tid, "removed": len(removals), "owners_kept": owners_kept, "unshared": True}
 
-    async def list_directory(self) -> dict[str, Any]:
-        """Share-target directory: group/user UUIDs with display names; emails are not returned."""
+    async def list_directory(self, *, group_ids: frozenset[str], user_ids: frozenset[str]) -> dict[str, Any]:
+        """Share-target directory: group/user UUIDs with display names; emails are not returned.
+
+        Only the share targets this binding's policy allows are returned (``group_ids``/``user_ids``);
+        everyone else in the vault stays invisible, exactly like the share tools' own allowlist.
+        """
         groups, users = await self._directory()
+
+        def allowed(item: Mapping[str, Any], ids: frozenset[str]) -> bool:
+            try:
+                return str(UUID(str(item.get("id")))) in ids
+            except ValueError:
+                return False
+
+        groups = [g for g in groups if allowed(g, group_ids)]
+        users = [u for u in users if allowed(u, user_ids)]
         profile = lambda u: u.get("profile") if isinstance(u.get("profile"), Mapping) else {}  # noqa: E731
         return {
             "groups": [

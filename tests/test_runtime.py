@@ -503,3 +503,19 @@ async def test_adapter_move_folder_and_unshare_follow_api_v5(monkeypatch):
         f"/share/resource/{RESOURCE}.json",
         {"permissions": [{"id": "p-read", "delete": True}], "secrets": []},
     )
+
+
+async def test_directory_tool_scopes_listing_to_binding_share_targets(config):
+    adapter = FixtureAdapter()
+    asked = []
+
+    async def list_directory(*, group_ids, user_ids):
+        asked.append((group_ids, user_ids))
+        return {"groups": [], "users": []}
+
+    adapter.list_directory = list_directory
+    _runtime, call = harness(config, adapter)
+    await call("passbolt_directory")
+    policy = adapter.access_policy("default")
+    assert asked == [(policy.group_ids, policy.user_ids)]
+

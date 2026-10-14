@@ -518,7 +518,7 @@ def register_tools(server: Any, runtime: Any) -> None:
     @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_directory(resource_id: str | None = None) -> dict[str, Any]:
         """Groups/users UUIDs for sharing, or who can access one resource (resource_id). No emails."""
-        adapter, _policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
+        adapter, policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
         if resource_id is not None:
             try:
                 resource_id = str(UUID(resource_id))
@@ -532,7 +532,8 @@ def register_tools(server: Any, runtime: Any) -> None:
             {"resource_id": resource_id},
             (lambda: adapter.resource_permissions(resource_id))
             if resource_id is not None
-            else adapter.list_directory,
+            # Only this binding's share targets: the rest of the vault's people stay invisible.
+            else (lambda: adapter.list_directory(group_ids=policy.group_ids, user_ids=policy.user_ids)),
             validate=lambda: None,
         )
         await _passbolt_audit("passbolt:read", "directory", "success", resource_id=resource_id)
