@@ -406,3 +406,30 @@ async def test_move_resource_is_approval_gated(config):
     approval = await approve(runtime, prepared)
     assert (await call("passbolt_move_resource", **args, approval_id=approval))["moved"]
     assert moved == [(RESOURCE, None)]
+
+
+async def test_move_and_directory_normalize_resource_uuid(config):
+    adapter = FixtureAdapter()
+    moved = []
+    perms = []
+
+    async def move_resource(resource_id, folder_id):
+        moved.append(resource_id)
+        return {"resource_id": resource_id, "folder_id": folder_id, "moved": True}
+
+    async def resource_permissions(resource_id):
+        perms.append(resource_id)
+        return {"resource_id": resource_id, "permissions": []}
+
+    adapter.move_resource = move_resource
+    adapter.resource_permissions = resource_permissions
+    runtime, call = harness(config, adapter)
+    args = {"resource_id": RESOURCE.upper(), "idempotency_key": "m2"}
+    prepared = await call("passbolt_move_resource", **args)
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_resource", **args, approval_id=approval))["moved"]
+    assert moved == [RESOURCE]
+    await call("passbolt_directory", resource_id=RESOURCE.upper())
+    assert perms == [RESOURCE]
+    with pytest.raises(SafeToolError):
+        await call("passbolt_directory", resource_id="not-a-uuid")

@@ -519,8 +519,13 @@ def register_tools(server: Any, runtime: Any) -> None:
     async def passbolt_directory(resource_id: str | None = None) -> dict[str, Any]:
         """Groups/users UUIDs for sharing, or who can access one resource (resource_id). No emails."""
         adapter, _policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
-        if resource_id is not None and resources is not None and resource_id not in resources:
-            raise PermissionError("Passbolt resource policy denied")
+        if resource_id is not None:
+            try:
+                resource_id = str(UUID(resource_id))
+            except (TypeError, ValueError) as exc:
+                raise PermissionError("Passbolt resource policy requires a UUID") from exc
+            if resources is not None and resource_id not in resources:
+                raise PermissionError("Passbolt resource policy denied")
         result = await _provider_read(
             "passbolt",
             "directory",
@@ -773,6 +778,10 @@ def register_tools(server: Any, runtime: Any) -> None:
             await _passbolt_audit("passbolt:write", "move_resource", "disabled", resource_id=resource_id)
             raise PermissionError("Passbolt write runtime is not enabled")
         adapter, _policy, resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            resource_id = str(UUID(resource_id))
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("Passbolt resource policy requires a UUID") from exc
         if resources is not None and resource_id not in resources:
             raise PermissionError("Passbolt resource policy denied")
         if folder_id is not None:
