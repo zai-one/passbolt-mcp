@@ -14,6 +14,15 @@
 - `PASSBOLT_TOOLSETS` unset or `default` keeps the 0.5.0 surface; `all` now also adds the opt-in `directory` and `organize` toolsets (write tools there still need `PASSBOLT_WRITE_ENABLED` and operator approval).
 - Router generated from `ROUTES` with tool/skill/guide per line and playbook + `guide/tool-map` fallback.
 - Router eval: 23 RU/EN requests (paraphrases, negative cases); fails on any unreachable tool, skill or guide.
+- Security: resuming a create-with-share (resource or folder) whose share is still pending now asks the
+  share elicitation again under the current `PASSBOLT_SHARE_ELICITATION` mode, with or without `approval_id`
+  (the first attempt consumed the approval); before, the resume executed the share without a prompt. Completed
+  results still replay without a prompt.
+- Security: `passbolt_unshare` re-reads permissions right before the PUT and refuses (`provider_precondition_failed`,
+  nothing sent, key settled as failed) if a selected permission is gone, reassigned or became owner. Passbolt has
+  no conditional permission update, so a promotion in the short window after that re-read is still not caught.
+- Fix: the share elicitation form is a required boolean confirmation field instead of an empty form (deprecated
+  in FastMCP; hangs or renders blank in some clients, e.g. VS Code); consent needs accept with the box ticked.
 
 ## 0.5.0
 

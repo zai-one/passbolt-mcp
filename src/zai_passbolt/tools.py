@@ -10,7 +10,13 @@ from uuid import UUID, uuid4
 from zai_passbolt import update_check
 from zai_passbolt.adapter import PassboltAccessPolicy, PassboltAdapter
 from zai_passbolt.elicitation import confirm_share, share_summary
-from zai_passbolt.transport import LocalPreDispatchDenied, ProviderError, ProviderHttpError, request_hash
+from zai_passbolt.transport import (
+    LocalPreDispatchDenied,
+    ProviderError,
+    ProviderHttpError,
+    ProviderPreconditionFailed,
+    request_hash,
+)
 
 # MCP tool annotations are client hints only; scopes, policies, approvals and
 # idempotency keys remain the enforcement.
@@ -347,6 +353,19 @@ def register_tools(server: Any, runtime: Any) -> None:
                         result={"error": "local_pre_dispatch_denied"},
                     )
                 raise
+            except ProviderPreconditionFailed:
+                # Raised only before any mutating request: a definitive failure, not unknown outcome.
+                if checkpoint_state is not None:
+                    await release_checkpoint()
+                else:
+                    await store.provider_write_settle(
+                        access.principal_id,
+                        "passbolt",
+                        key,
+                        status="failed",
+                        result={"error": "precondition_failed"},
+                    )
+                raise
             except ProviderHttpError as exc:
                 if checkpoint_state is not None:
                     await release_checkpoint()
@@ -613,6 +632,7 @@ def register_tools(server: Any, runtime: Any) -> None:
     async def _elicit_share(
         operation: str,
         arguments: dict[str, Any],
+        idempotency_key: str,
         kind: str,
         target: str,
         groups: list[str],
@@ -620,18 +640,34 @@ def register_tools(server: Any, runtime: Any) -> None:
         permission: str,
         approval_id: str | None,
     ) -> str | None:
-        """Ask the human via MCP elicitation, only for a valid accepted approval of this exact request.
+        """Ask the human via MCP elicitation before any call that will execute a share.
 
-        No approval, a wrong/expired/consumed one, or a digest mismatch: no prompt; `_passbolt_write`
-        then rejects (or replays an already-finished idempotent write) exactly as before.
+        That is a fresh write with a valid accepted approval for this exact request, or a resume of a
+        create-with-share checkpoint for this key and request (its approval was consumed by the first
+        attempt, so the share is confirmed again under the current mode). No approval, a
+        wrong/expired/consumed one, a digest mismatch, or a completed/failed key: no prompt;
+        `_passbolt_write` then rejects (or replays an already-finished idempotent write) as before.
         """
-        if approval_id is None or not (groups or users):
+        if not (groups or users):
             return None
         digest = request_hash({"provider": "passbolt", "operation": operation, "arguments": arguments})
-        try:
-            await _passbolt_matching_approval(operation, digest, approval_id)
-        except PermissionError:
+        existing = await store.provider_write_lookup(
+            current_access().principal_id, "passbolt", _passbolt_idempotency_key(idempotency_key)
+        )
+        if existing is not None:
+            if (
+                existing.get("request_hash") != digest
+                or existing.get("status") in {"applied", "failed"}
+                or _passbolt_write_checkpoint(operation, existing.get("result")) is None
+            ):
+                return None
+        elif approval_id is None:
             return None
+        else:
+            try:
+                await _passbolt_matching_approval(operation, digest, approval_id)
+            except PermissionError:
+                return None
         mode = getattr(settings, "passbolt_share_elicitation", "auto")
         try:
             return await confirm_share(share_summary(kind, target, groups, users, permission), mode)
@@ -691,6 +727,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         await _elicit_share(
             "create_resource",
             arguments,
+            idempotency_key,
             "resource",
             name,
             resolved_groups,
@@ -989,7 +1026,15 @@ def register_tools(server: Any, runtime: Any) -> None:
             "share_mode": share_mode,
         }
         await _elicit_share(
-            "create_folder", arguments, "folder", name, resolved_groups, resolved_users, "read", approval_id
+            "create_folder",
+            arguments,
+            idempotency_key,
+            "folder",
+            name,
+            resolved_groups,
+            resolved_users,
+            "read",
+            approval_id,
         )
         try:
             result = await _passbolt_write(
@@ -1064,6 +1109,7 @@ def register_tools(server: Any, runtime: Any) -> None:
         elicited = await _elicit_share(
             "share_resource",
             arguments,
+            idempotency_key,
             "resource",
             resource_id,
             resolved_groups,

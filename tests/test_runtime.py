@@ -498,7 +498,9 @@ async def test_adapter_move_folder_and_unshare_follow_api_v5(monkeypatch):
         f"/share/simulate/resource/{RESOURCE}.json",
         {"permissions": [{"id": "p-read", "delete": True}]},
     )
-    assert sent[2] == (
+    # Re-read right before the PUT (owner-promotion guard), then the PUT itself.
+    assert sent[2][:2] == ("GET", f"/permissions/resource/{RESOURCE}.json")
+    assert sent[3] == (
         "PUT",
         f"/share/resource/{RESOURCE}.json",
         {"permissions": [{"id": "p-read", "delete": True}], "secrets": []},
@@ -546,3 +548,81 @@ async def test_organize_failures_are_audited(config):
         rows = [json.loads(data) for (data,) in db.execute("SELECT data FROM passbolt_audit")]
     errors = {(row["action"], row["outcome"]) for row in rows if row["outcome"] == "error"}
     assert errors == {("move_folder", "error"), ("unshare", "error")}
+
+
+async def test_checkpoint_share_resume_asks_elicitation_again(config, monkeypatch):
+    """A create-with-share resume executes the share: it must be confirmed again, approval or not."""
+    from zai_passbolt import tools as tools_mod
+
+    asked, answers = [], ["accepted", PermissionError("declined"), "accepted"]
+
+    async def fake_confirm(message, mode="auto"):
+        asked.append(message)
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(tools_mod, "confirm_share", fake_confirm)
+    adapter = FixtureAdapter()
+    adapter.checkpoint_failure = True
+    runtime, call = harness(config, adapter)
+    args = {**CREATE, "share_mode": "explicit", "share_with_users": [RESOURCE]}
+    approval = await approve(runtime, await call("passbolt_create_resource", **args))
+    with pytest.raises(SafeToolError):
+        await call("passbolt_create_resource", **args, approval_id=approval)
+    assert len(asked) == 1 and len(adapter.calls) == 1
+    # Resume without approval_id (the approval was consumed): declined prompt, nothing resumes.
+    with pytest.raises(SafeToolError):
+        await call("passbolt_create_resource", **args)
+    assert len(asked) == 2 and len(adapter.calls) == 1
+    record = await runtime.store.provider_write_lookup("alice", "passbolt", "create-1")
+    assert record["result"]["state"] == "resume_ready"
+    result = await call("passbolt_create_resource", **args)
+    assert result["idempotent"] and len(asked) == 3 and len(adapter.calls) == 2
+    # A completed result is replayed without a prompt and without touching Passbolt.
+    assert (await call("passbolt_create_resource", **args))["idempotent"]
+    assert len(asked) == 3 and len(adapter.calls) == 2
+
+
+async def test_adapter_unshare_refuses_when_selected_permission_became_owner(monkeypatch):
+    from zai_passbolt.transport import ProviderPreconditionFailed
+
+    adapter = PassboltAdapter.__new__(PassboltAdapter)
+    sent, reads = [], []
+    reader = str(uuid4())
+
+    async def fake_request(method, path, payload=None, params=None, **_):
+        sent.append((method, path, payload))
+        if path.startswith("/permissions/resource/"):
+            reads.append(path)
+            # Another owner promotes the selected reader between the first read and the apply.
+            kind = 1 if len(reads) == 1 else 15
+            return {"body": [{"id": "p-read", "aro_foreign_key": reader, "type": kind}]}
+        return {"body": {}}
+
+    adapter._request = fake_request
+    with pytest.raises(ProviderPreconditionFailed):
+        await adapter.unshare("resource", RESOURCE, [reader])
+    assert len(reads) == 2 and not [item for item in sent if item[0] == "PUT"]
+
+
+async def test_unshare_precondition_failure_is_definitive_not_pending(config):
+    from zai_passbolt.transport import ProviderPreconditionFailed
+
+    adapter = FixtureAdapter()
+
+    async def unshare(kind, target_id, aro_ids):
+        raise ProviderPreconditionFailed("permissions changed")
+
+    adapter.unshare = unshare
+    runtime, call = harness(config, adapter)
+    uargs = dict(kind="resource", target_id=RESOURCE, aro_ids=[RESOURCE], idempotency_key="u-race")
+    approval = await approve(runtime, await call("passbolt_unshare", **uargs))
+    with pytest.raises(SafeToolError) as caught:
+        await call("passbolt_unshare", **uargs, approval_id=approval)
+    assert caught.value.error_code == "provider_precondition_failed"
+    record = await runtime.store.provider_write_lookup("alice", "passbolt", "u-race")
+    assert record["status"] == "failed"
+    # Nothing was changed in Passbolt, so other writes are not blocked as an unknown outcome.
+    assert (await call("passbolt_create_resource", **{**CREATE, "idempotency_key": "after"}))["created"]

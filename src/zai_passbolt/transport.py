@@ -77,6 +77,10 @@ class ProviderRequestTooLarge(ProviderRequestError):
     pass
 
 
+class ProviderPreconditionFailed(ProviderRequestError):
+    """Raised before any mutating request: Passbolt no longer matches what was checked, nothing changed."""
+
+
 class ProviderResponseTooLarge(ProviderResponseError):
     pass
 

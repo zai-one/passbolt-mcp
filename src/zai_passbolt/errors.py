@@ -10,6 +10,7 @@ from zai_passbolt.transport import (
     ProviderError,
     ProviderHttpError,
     ProviderNotFoundError,
+    ProviderPreconditionFailed,
     ProviderRateLimited,
     ProviderRequestError,
     ProviderRequestTooLarge,
@@ -42,6 +43,8 @@ def safe_provider_error(provider: str, exc: Exception) -> SafeToolError:
         code = "provider_resource_not_found"
     elif isinstance(exc, (ProviderRequestTooLarge, ProviderResponseTooLarge)):
         code = "provider_payload_too_large"
+    elif isinstance(exc, ProviderPreconditionFailed):
+        code = "provider_precondition_failed"
     elif isinstance(exc, ProviderRequestError):
         code = "provider_request_invalid"
     elif isinstance(exc, ProviderTimeoutError):

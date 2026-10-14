@@ -5,13 +5,14 @@ import pytest
 from zai_passbolt import elicitation as el
 
 
-def _ctx(action, supported=True):
+def _ctx(action, supported=True, data=True):
     caps = SimpleNamespace(elicitation=object() if supported else None)
     session = SimpleNamespace(client_params=SimpleNamespace(capabilities=caps))
 
-    async def elicit(message, response_type=None):
+    async def elicit(message, response_type=None, **kwargs):
         _ctx.last = message
-        return SimpleNamespace(action=action)
+        _ctx.response_type = response_type
+        return SimpleNamespace(action=action, data=data if action == "accept" else None)
 
     return SimpleNamespace(session=session, elicit=elicit)
 
@@ -31,6 +32,14 @@ async def test_confirm_share_actions(monkeypatch, action, ok):
             await el.confirm_share("m")
 
 
+@pytest.mark.parametrize("data", [False, None, "yes", 1, {}])
+async def test_accept_without_ticked_confirmation_is_refused(monkeypatch, data):
+    monkeypatch.setattr(el, "get_context", lambda: _ctx("accept", data=data))
+    with pytest.raises(PermissionError):
+        await el.confirm_share("m")
+    assert _ctx.response_type is bool
+
+
 async def test_unsupported_client_auto_vs_required(monkeypatch):
     monkeypatch.setattr(el, "get_context", lambda: _ctx("accept", supported=False))
     assert await el.confirm_share("m", "auto") == "skipped"
@@ -47,7 +56,7 @@ async def test_off_and_bad_mode(monkeypatch):
 async def test_elicitation_error_fails_closed(monkeypatch):
     ctx = _ctx("accept")
 
-    async def boom(message, response_type=None):
+    async def boom(message, response_type=None, **kwargs):
         raise RuntimeError("transport")
 
     ctx.elicit = boom
