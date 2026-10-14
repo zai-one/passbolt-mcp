@@ -1,20 +1,117 @@
 [
-  {"request": "залогинься в админку клиента, пароль в пассболте", "route": "login", "tool": "passbolt_use_secret"},
-  {"request": "нужен доступ к сайту crm.example.com", "route": "login", "tool": "passbolt_select"},
-  {"request": "sign in to the staging dashboard for me", "route": "login", "tool": "passbolt_use_secret"},
-  {"request": "use the stored password for the ftp", "route": "login", "tool": "passbolt_use_secret"},
-  {"request": "найди креды от гугл аналитики", "route": "find", "tool": "passbolt_search"},
-  {"request": "search the vault for the aws credential", "route": "find", "tool": "passbolt_search"},
-  {"request": "find the github bot entry", "route": "find", "tool": "passbolt_search"},
-  {"request": "сделай аудит: какие папки и кто видит", "route": "review", "tool": "passbolt_list_folders"},
-  {"request": "ревизия прав по клиенту", "route": "review", "tool": "passbolt_list_folders"},
-  {"request": "access review of our folders", "route": "review", "tool": "passbolt_list_folders"},
-  {"request": "новый клиент, заведи папку и запись", "route": "onboard", "tool": "passbolt_create_folder"},
-  {"request": "create a new entry for the client wordpress", "route": "onboard", "tool": "passbolt_create_resource"},
-  {"request": "расшарь запись на группу маркетинга", "route": "share", "tool": "passbolt_share_resource"},
-  {"request": "выдать доступ коллеге к записи", "route": "share", "tool": "passbolt_share_resource"},
-  {"request": "share that entry with the devops team", "route": "share", "tool": "passbolt_share_resource"},
-  {"request": "проверка: ключ работает?", "route": "status", "tool": "passbolt_status"},
-  {"request": "setup fails with an error", "route": "status", "tool": "passbolt_local_diagnostics"},
-  {"request": "what's the status of the vault connection", "route": "status", "tool": "passbolt_status"}
+  {
+    "request": "залогинься в админку, пароль лежит в пассболте",
+    "route": "login",
+    "tool": "passbolt_use_secret"
+  },
+  {
+    "request": "нужен доступ к сайту crm.example.com",
+    "route": "login",
+    "tool": "passbolt_select"
+  },
+  {
+    "request": "sign in to the staging dashboard for me",
+    "route": "login",
+    "tool": "passbolt_use_secret"
+  },
+  {
+    "request": "use the stored password for the ftp",
+    "route": "login",
+    "tool": "passbolt_use_secret"
+  },
+  {
+    "request": "найди креды от гугл аналитики",
+    "route": "find",
+    "tool": "passbolt_search"
+  },
+  {
+    "request": "search the vault for the aws credential",
+    "route": "find",
+    "tool": "passbolt_search"
+  },
+  {
+    "request": "find the github bot entry",
+    "route": "find",
+    "tool": "passbolt_search"
+  },
+  {
+    "request": "сделай аудит: какие папки и кто видит",
+    "route": "review",
+    "tool": "passbolt_list_folders"
+  },
+  {
+    "request": "ревизия прав по клиенту",
+    "route": "review",
+    "tool": "passbolt_list_folders"
+  },
+  {
+    "request": "access review of our folders",
+    "route": "review",
+    "tool": "passbolt_list_folders"
+  },
+  {
+    "request": "новый клиент, заведи папку и запись",
+    "route": "onboard",
+    "tool": "passbolt_create_folder"
+  },
+  {
+    "request": "create a new entry for the client wordpress",
+    "route": "onboard",
+    "tool": "passbolt_create_resource"
+  },
+  {
+    "request": "расшарь запись на группу маркетинга",
+    "route": "share",
+    "tool": "passbolt_share_resource"
+  },
+  {
+    "request": "выдать доступ коллеге к записи",
+    "route": "share",
+    "tool": "passbolt_share_resource"
+  },
+  {
+    "request": "share that entry with the devops team",
+    "route": "share",
+    "tool": "passbolt_share_resource"
+  },
+  {
+    "request": "проверка: ключ работает?",
+    "route": "status",
+    "tool": "passbolt_status"
+  },
+  {
+    "request": "setup fails with an error",
+    "route": "status",
+    "tool": "passbolt_local_diagnostics"
+  },
+  {
+    "request": "what's the status of the vault connection",
+    "route": "status",
+    "tool": "passbolt_status"
+  },
+  {
+    "request": "onboard a new client: create their folder",
+    "route": "onboard",
+    "tool": "passbolt_create_folder"
+  },
+  {
+    "request": "какая погода завтра в Москве",
+    "route": null,
+    "tool": ""
+  },
+  {
+    "request": "translate this paragraph into German",
+    "route": null,
+    "tool": ""
+  },
+  {
+    "request": "напиши стихотворение про осень",
+    "route": null,
+    "tool": ""
+  },
+  {
+    "request": "book a table at the restaurant tonight",
+    "route": null,
+    "tool": ""
+  }
 ]
