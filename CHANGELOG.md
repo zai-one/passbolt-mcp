@@ -3,6 +3,8 @@
 
 ## Unreleased
 
+- `passbolt_move_folder` (PUT /move/folder) and `passbolt_unshare` (share `{id, delete:true}`, owners kept, simulate first) in the opt-in `organize` toolset, both approval-gated.
+
 - Shares now ask the user through MCP elicitation right before an approved share executes
   (`passbolt_share_resource`, create resource/folder with `share_with_*`); decline/cancel aborts and is
   audited. `PASSBOLT_SHARE_ELICITATION=auto|required|off` (default `auto`). Operator approval still required.

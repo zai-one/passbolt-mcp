@@ -433,3 +433,73 @@ async def test_move_and_directory_normalize_resource_uuid(config):
     assert perms == [RESOURCE]
     with pytest.raises(SafeToolError):
         await call("passbolt_directory", resource_id="not-a-uuid")
+
+
+async def test_move_folder_and_unshare_are_approval_gated(config):
+    adapter = FixtureAdapter()
+    done = []
+
+    async def move_folder(folder_id, parent_id):
+        done.append(("move", folder_id, parent_id))
+        return {"folder_id": folder_id, "parent_id": parent_id, "moved": True}
+
+    async def unshare(kind, target_id, aro_ids):
+        done.append(("unshare", kind, target_id, tuple(aro_ids)))
+        return {"resource_id": target_id, "removed": 1, "owners_kept": 0, "unshared": True}
+
+    adapter.move_folder = move_folder
+    adapter.unshare = unshare
+    runtime, call = harness(config, adapter)
+    margs = {"folder_id": RESOURCE.upper(), "idempotency_key": "f1"}
+    prepared = await call("passbolt_move_folder", **margs)
+    assert prepared["confirmation_required"] and not done
+    approval = await approve(runtime, prepared)
+    assert (await call("passbolt_move_folder", **margs, approval_id=approval))["moved"]
+    uargs = {"kind": "resource", "target_id": RESOURCE, "aro_ids": [RESOURCE], "idempotency_key": "u1"}
+    prepared = await call("passbolt_unshare", **uargs)
+    assert prepared["confirmation_required"]
+    approval = await approve(runtime, prepared)
+    with pytest.raises(SafeToolError):  # approval is bound to the exact request
+        await call("passbolt_unshare", **{**uargs, "kind": "folder"}, approval_id=approval)
+    assert (await call("passbolt_unshare", **uargs, approval_id=approval))["unshared"]
+    assert done == [("move", RESOURCE, None), ("unshare", "resource", RESOURCE, (RESOURCE,))]
+    with pytest.raises(SafeToolError):
+        await call(
+            "passbolt_unshare", kind="resource", target_id=RESOURCE, aro_ids=["x"], idempotency_key="u2"
+        )
+
+
+async def test_adapter_move_folder_and_unshare_follow_api_v5(monkeypatch):
+    adapter = PassboltAdapter.__new__(PassboltAdapter)
+    sent = []
+    owner, reader = str(uuid4()), str(uuid4())
+
+    async def fake_request(method, path, payload=None, params=None, **_):
+        sent.append((method, path, payload))
+        if path.startswith("/permissions/resource/"):
+            return {
+                "body": [
+                    {"id": "p-owner", "aro_foreign_key": owner, "type": 15},
+                    {"id": "p-read", "aro_foreign_key": reader, "type": 1},
+                ]
+            }
+        return {"body": {}}
+
+    adapter._request = fake_request
+    out = await adapter.move_folder(RESOURCE, None)
+    assert sent[-1] == ("PUT", f"/move/folder/{RESOURCE}.json", {"folder_parent_id": None}) and out["moved"]
+    with pytest.raises(ValueError):
+        await adapter.move_folder(RESOURCE, RESOURCE)
+    sent.clear()
+    out = await adapter.unshare("resource", RESOURCE, [owner, reader])
+    assert out == {"resource_id": RESOURCE, "removed": 1, "owners_kept": 1, "unshared": True}
+    assert sent[1] == (
+        "POST",
+        f"/share/simulate/resource/{RESOURCE}.json",
+        {"permissions": [{"id": "p-read", "delete": True}]},
+    )
+    assert sent[2] == (
+        "PUT",
+        f"/share/resource/{RESOURCE}.json",
+        {"permissions": [{"id": "p-read", "delete": True}], "secrets": []},
+    )

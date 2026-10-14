@@ -1937,6 +1937,53 @@ class PassboltAdapter:
         await self._request("PUT", f"/move/resource/{quote(rid)}.json", payload={"folder_parent_id": parent})
         return {"resource_id": rid, "folder_id": parent, "moved": True}
 
+    async def move_folder(self, folder_id: str, parent_id: str | None) -> dict[str, Any]:
+        """Move one folder under another folder or to the root (PUT /move/folder/{id}.json)."""
+        fid = _uuid(folder_id, "folder_id")
+        parent = _uuid(parent_id, "parent_id") if parent_id is not None else None
+        if parent == fid:
+            raise ValueError("a folder cannot be moved into itself")
+        await self._request("PUT", f"/move/folder/{quote(fid)}.json", payload={"folder_parent_id": parent})
+        return {"folder_id": fid, "parent_id": parent, "moved": True}
+
+    async def unshare(self, kind: str, target_id: str, aro_ids: list[str]) -> dict[str, Any]:
+        """Remove user/group permissions (PUT /share/{resource|folder}/{id}.json, {id, delete:true}).
+
+        Owner (type 15) permissions are never removed here, so the item cannot lose its last owner;
+        removing access needs no secrets. Resources are simulated first (share/simulate).
+        """
+        if kind not in {"resource", "folder"}:
+            raise ValueError("kind must be resource or folder")
+        tid = _uuid(target_id, f"{kind}_id")
+        wanted = {_uuid(item, "aro_id") for item in aro_ids}
+        if not wanted:
+            raise ValueError("aro_ids must name at least one user or group")
+        if kind == "resource":
+            body = _unwrap(await self._request("GET", f"/permissions/resource/{quote(tid)}.json"))
+        else:
+            folder = _unwrap(
+                await self._request("GET", f"/folders/{quote(tid)}.json", params={"contain[permissions]": 1})
+            )
+            body = folder.get("permissions") if isinstance(folder, Mapping) else None
+        if not isinstance(body, list):
+            raise ProviderResponseError("Passbolt permissions response is not a list")
+        removals: list[dict[str, Any]] = []
+        owners_kept = 0
+        for item in body:
+            if not isinstance(item, Mapping) or str(item.get("aro_foreign_key")) not in wanted:
+                continue
+            if item.get("type") == 15:
+                owners_kept += 1
+                continue
+            removals.append({"id": str(item.get("id")), "delete": True})
+        if not removals:
+            return {f"{kind}_id": tid, "removed": 0, "owners_kept": owners_kept, "unshared": False}
+        payload = {"permissions": removals}
+        if kind == "resource":
+            await self._request("POST", f"/share/simulate/resource/{quote(tid)}.json", payload=payload)
+        await self._request("PUT", f"/share/{kind}/{quote(tid)}.json", payload={**payload, "secrets": []})
+        return {f"{kind}_id": tid, "removed": len(removals), "owners_kept": owners_kept, "unshared": True}
+
     async def list_directory(self) -> dict[str, Any]:
         """Share-target directory: group/user UUIDs with display names; emails are not returned."""
         groups, users = await self._directory()

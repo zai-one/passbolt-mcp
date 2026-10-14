@@ -34,6 +34,10 @@ ROUTER = build_router(
 DESCRIPTIONS = {
     "passbolt_move_resource": "Move one resource into a folder or to root (approval-gated). First call "
     "returns approval_id; operator accepts outside MCP. Permissions are not changed; share separately.",
+    "passbolt_move_folder": "Move one folder under another or to root (approval-gated). First call "
+    "returns approval_id; operator accepts outside MCP.",
+    "passbolt_unshare": "Remove user/group access to a resource or folder; owners are kept "
+    "(approval-gated). First call returns approval_id; operator accepts outside MCP.",
     "passbolt_directory": "List group/user UUIDs for sharing, or who can access one resource. Use before "
     "share or in access reviews. Metadata only; no emails, never secrets.",
     "passbolt_local_diagnostics": "Check local key usability and binding policy. Use when setup fails; "
@@ -70,7 +74,7 @@ TOOLSETS = {
         "passbolt_share_resource",
     ),
     "directory": ("passbolt_directory",),
-    "organize": ("passbolt_move_resource",),
+    "organize": ("passbolt_move_resource", "passbolt_move_folder", "passbolt_unshare"),
 }
 OPTIN = ("directory", "organize")
 

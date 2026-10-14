@@ -4,7 +4,7 @@ import inspect
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from zai_passbolt import update_check
@@ -764,6 +764,82 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         if sealed_consumed:
             await _passbolt_audit("passbolt:write", "sealed_ref_consumed", "success", resource_id=resource_id)
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
+    async def passbolt_move_folder(
+        folder_id: str,
+        idempotency_key: str,
+        parent_id: str | None = None,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approval-gated move of one folder under another folder (or root when parent_id is omitted)."""
+        if not settings.passbolt_write_enabled:
+            await _passbolt_audit("passbolt:write", "move_folder", "disabled")
+            raise PermissionError("Passbolt write runtime is not enabled")
+        adapter, _policy, _resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            folder_id = str(UUID(folder_id))
+            parent_id = str(UUID(parent_id)) if parent_id is not None else None
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("Passbolt folder policy requires a UUID") from exc
+        if folders is not None and (
+            folder_id not in folders or parent_id is None or parent_id not in folders
+        ):
+            raise PermissionError("Passbolt folder policy denied")
+        arguments = {"folder_id": folder_id, "parent_id": parent_id}
+        result = await _passbolt_write(
+            "move_folder",
+            arguments,
+            idempotency_key,
+            lambda: adapter.move_folder(folder_id, parent_id),
+            approval_id=approval_id,
+            approval_required=True,
+        )
+        await _passbolt_audit(
+            "passbolt:write",
+            "move_folder" if result.get("moved") else "move_folder_prepare",
+            "success" if result.get("moved") else "prepared",
+        )
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
+    async def passbolt_unshare(
+        kind: Literal["resource", "folder"],
+        target_id: str,
+        aro_ids: list[str],
+        idempotency_key: str,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approval-gated removal of user/group access to a resource or folder; owners are kept."""
+        if not settings.passbolt_write_enabled:
+            await _passbolt_audit("passbolt:write", "unshare", "disabled")
+            raise PermissionError("Passbolt write runtime is not enabled")
+        adapter, _policy, resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            target_id = str(UUID(target_id))
+            aro = sorted({str(UUID(item)) for item in aro_ids})
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PermissionError("Passbolt unshare policy requires UUIDs") from exc
+        if not aro or len(aro) > 100:
+            raise PermissionError("Passbolt unshare needs 1-100 user/group UUIDs")
+        allowed = resources if kind == "resource" else folders
+        if allowed is not None and target_id not in allowed:
+            raise PermissionError(f"Passbolt {kind} policy denied")
+        arguments = {"kind": kind, "target_id": target_id, "aro_ids": aro}
+        result = await _passbolt_write(
+            "unshare",
+            arguments,
+            idempotency_key,
+            lambda: adapter.unshare(kind, target_id, aro),
+            approval_id=approval_id,
+            approval_required=True,
+        )
+        await _passbolt_audit(
+            "passbolt:write",
+            "unshare" if "removed" in result else "unshare_prepare",
+            "success" if "removed" in result else "prepared",
+        )
         return result
 
     @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
