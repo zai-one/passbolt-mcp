@@ -789,14 +789,18 @@ def register_tools(server: Any, runtime: Any) -> None:
         ):
             raise PermissionError("Passbolt folder policy denied")
         arguments = {"folder_id": folder_id, "parent_id": parent_id}
-        result = await _passbolt_write(
-            "move_folder",
-            arguments,
-            idempotency_key,
-            lambda: adapter.move_folder(folder_id, parent_id),
-            approval_id=approval_id,
-            approval_required=True,
-        )
+        try:
+            result = await _passbolt_write(
+                "move_folder",
+                arguments,
+                idempotency_key,
+                lambda: adapter.move_folder(folder_id, parent_id),
+                approval_id=approval_id,
+                approval_required=True,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:write", "move_folder", "error")
+            raise
         await _passbolt_audit(
             "passbolt:write",
             "move_folder" if result.get("moved") else "move_folder_prepare",
@@ -828,18 +832,24 @@ def register_tools(server: Any, runtime: Any) -> None:
         if allowed is not None and target_id not in allowed:
             raise PermissionError(f"Passbolt {kind} policy denied")
         arguments = {"kind": kind, "target_id": target_id, "aro_ids": aro}
-        result = await _passbolt_write(
-            "unshare",
-            arguments,
-            idempotency_key,
-            lambda: adapter.unshare(kind, target_id, aro),
-            approval_id=approval_id,
-            approval_required=True,
-        )
+        audited_id = target_id if kind == "resource" else None
+        try:
+            result = await _passbolt_write(
+                "unshare",
+                arguments,
+                idempotency_key,
+                lambda: adapter.unshare(kind, target_id, aro),
+                approval_id=approval_id,
+                approval_required=True,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:write", "unshare", "error", resource_id=audited_id)
+            raise
         await _passbolt_audit(
             "passbolt:write",
             "unshare" if "removed" in result else "unshare_prepare",
             "success" if "removed" in result else "prepared",
+            resource_id=audited_id,
         )
         return result
 

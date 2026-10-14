@@ -54,3 +54,12 @@ async def test_elicitation_error_fails_closed(monkeypatch):
     monkeypatch.setattr(el, "get_context", lambda: ctx)
     with pytest.raises(PermissionError):
         await el.confirm_share("m")
+
+
+@pytest.mark.parametrize("mode", ["maybe", "", "REQUIRED"])
+def test_invalid_mode_rejected_at_startup(config, mode):
+    from dataclasses import replace
+
+    with pytest.raises(ValueError):
+        replace(config, passbolt_share_elicitation=mode)
+    assert replace(config, passbolt_share_elicitation="required").passbolt_share_elicitation == "required"

@@ -52,6 +52,9 @@ class ServiceConfig:
             for v in (self.enabled, self.passbolt_write_enabled, self.passbolt_use_enabled)
         ):
             raise ValueError("boolean runtime policy required")
+        if self.passbolt_share_elicitation not in {"auto", "required", "off"}:
+            # Fail at startup, not on the first approved share.
+            raise ValueError("PASSBOLT_SHARE_ELICITATION must be auto, required or off")
         copied = dict(self.bindings)
         if any(
             not isinstance(actor, str)

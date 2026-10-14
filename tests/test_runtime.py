@@ -519,3 +519,30 @@ async def test_directory_tool_scopes_listing_to_binding_share_targets(config):
     policy = adapter.access_policy("default")
     assert asked == [(policy.group_ids, policy.user_ids)]
 
+
+async def test_organize_failures_are_audited(config):
+    import json
+    import sqlite3
+
+    adapter = FixtureAdapter()
+
+    async def broken(*_args):
+        raise ProviderError("vault down")
+
+    adapter.move_folder = broken
+    adapter.unshare = broken
+    runtime, call = harness(config, adapter)
+    for tool, args in (
+        ("passbolt_move_folder", {"folder_id": RESOURCE, "idempotency_key": "fail-f"}),
+        (
+            "passbolt_unshare",
+            {"kind": "resource", "target_id": RESOURCE, "aro_ids": [RESOURCE], "idempotency_key": "fail-u"},
+        ),
+    ):
+        approval = await approve(runtime, await call(tool, **args))
+        with pytest.raises(SafeToolError):
+            await call(tool, **args, approval_id=approval)
+    with sqlite3.connect(config.state_path) as db:
+        rows = [json.loads(data) for (data,) in db.execute("SELECT data FROM passbolt_audit")]
+    errors = {(row["action"], row["outcome"]) for row in rows if row["outcome"] == "error"}
+    assert errors == {("move_folder", "error"), ("unshare", "error")}
