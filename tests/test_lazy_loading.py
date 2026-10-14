@@ -160,3 +160,16 @@ def test_setup_wizard_asks_eager_or_lazy(answer, mode, monkeypatch):
     monkeypatch.setattr("builtins.input", fake_input)
     assert setup._tool_loading() == mode
     assert "lazy" in asked[0] and "eager" in asked[0]
+
+
+async def test_enablement_is_per_session(tmp_path, monkeypatch):
+    monkeypatch.setenv(f"{ENV}_TOOL_LOADING", "lazy")
+    shared = build(tmp_path / "shared")
+    async with Client(shared) as first, Client(shared) as second:
+        before = {tool.name for tool in await second.list_tools()}
+        result = (await first.call_tool(ENABLE, {"toolsets": ["all"]})).data
+        assert result["scope"] == "session" and result["added_tools"]
+        assert set(result["added_tools"]) <= {tool.name for tool in await first.list_tools()}
+        assert {tool.name for tool in await second.list_tools()} == before
+        with pytest.raises(Exception):  # noqa: B017 - hidden for this session: unknown tool
+            await second.call_tool(result["added_tools"][0], {})

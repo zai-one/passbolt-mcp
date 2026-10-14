@@ -15,7 +15,6 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-import mcp.types
 from fastmcp import Context
 
 MODES = ("eager", "lazy")
@@ -73,32 +72,38 @@ def _summary(profile: Any, toolset: str, names: list[str]) -> str:
     return ", ".join(names)
 
 
+SESSION_KEY = "_zai_lazy_enabled_tools"
+
+
 def install(server: Any, profile: Any, keep: set[str], environ: Mapping[str, str] | None = None) -> set[str]:
-    """Defer non-core tools in lazy mode. Returns the names listed at start."""
+    """Hide non-core tools in lazy mode; enabling is per MCP session. Returns the names listed at start.
+
+    Deferred tools stay registered but are disabled globally by name; ``<service>_enable_toolsets``
+    re-enables them for the calling session only (FastMCP session visibility rules), so one client's
+    choice never changes another client's tool list. Stateless HTTP has no session that outlives a
+    request, so enablement there lasts one request: use eager (or <ENV>_TOOLSETS) for HTTP.
+    """
     if loading_mode(profile, environ) != "lazy":
         return set(keep)
     components = server.local_provider._components  # fastmcp is pinned; no public sync accessor
-    by_name = {tool.name: key for key, tool in components.items() if key.startswith("tool:")}
+    tools = {tool.name: tool for key, tool in components.items() if key.startswith("tool:")}
     grouped = {name for names in profile.toolsets.values() for name in names}
     # Core: meta toolset, router entry tools and anything outside every toolset (never stranded).
     core = (
         set(profile.toolsets.get("meta", ())) | set(getattr(profile, "lazy_core", ())) | (keep - grouped)
     ) & keep
-    deferred: dict[str, Any] = {}
-    for name in sorted(keep - core):
-        key = by_name.get(name)
-        if key is not None:
-            deferred[name] = components.pop(key)
+    deferred = {name: tools[name] for name in sorted(keep - core) if name in tools}
+    if deferred:
+        server.disable(names=set(deferred), components={"tool"})
     groups: dict[str, list[str]] = {}
     for toolset, names in profile.toolsets.items():
         members = [name for name in names if name in deferred]
         if members:
             groups[toolset] = members
-    enabled: set[str] = set()
     hint = fallback_hint(profile)
     tool_name = enable_tool_name(profile)
 
-    def catalog() -> list[dict[str, Any]]:
+    def catalog(enabled: set[str]) -> list[dict[str, Any]]:
         return [
             {
                 "toolset": toolset,
@@ -113,9 +118,15 @@ def install(server: Any, profile: Any, keep: set[str], environ: Mapping[str, str
     async def enable_toolsets(
         toolsets: list[str] | None = None, ctx: Context | None = None
     ) -> dict[str, Any]:
+        enabled: set[str] = set(await ctx.get_state(SESSION_KEY) or []) if ctx is not None else set()
         requested = [item.strip() for item in (toolsets or []) if item and item.strip()]
         if not requested:
-            return {"mode": "lazy", "toolsets": catalog(), "hint": f"Call {tool_name}(toolsets=[...])."}
+            return {
+                "mode": "lazy",
+                "scope": "session",
+                "toolsets": catalog(enabled),
+                "hint": f"Call {tool_name}(toolsets=[...]).",
+            }
         if "all" in requested:
             requested = list(groups)
         unknown = sorted(set(requested) - set(groups))
@@ -126,17 +137,14 @@ def install(server: Any, profile: Any, keep: set[str], environ: Mapping[str, str
                 "available": sorted(groups),
                 "note": "Toolsets outside the allowlist or removed by read-only mode cannot be enabled.",
             }
-        added: list[str] = []
-        for toolset in requested:
-            for name in groups[toolset]:
-                if name not in enabled:
-                    server.add_tool(deferred[name])
-                    enabled.add(name)
-                    added.append(name)
+        added = list(dict.fromkeys(n for ts in requested for n in groups[ts] if n not in enabled))
         if added and ctx is not None:
-            await ctx.send_notification(mcp.types.ToolListChangedNotification())
+            # Session-only rule; FastMCP sends tools/list_changed to this session.
+            await ctx.enable_components(names=set(added), components={"tool"})
+            await ctx.set_state(SESSION_KEY, sorted(enabled | set(added)))
         return {
             "mode": "lazy",
+            "scope": "session",
             "enabled": requested,
             "added_tools": added,
             "already_enabled": not added,
@@ -146,7 +154,7 @@ def install(server: Any, profile: Any, keep: set[str], environ: Mapping[str, str
     enable_toolsets.__name__ = tool_name
     enable_toolsets.__doc__ = (
         "List toolsets that are not loaded yet (description, tools, token cost), or enable them by "
-        "name ('all' enables every one). Enabled tools appear via tools/list_changed."
+        "name for this session ('all' enables every one). Enabled tools appear via tools/list_changed."
     )
     server.tool(
         name=tool_name,

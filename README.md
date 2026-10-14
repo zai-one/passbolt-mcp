@@ -28,7 +28,7 @@ The [protected endpoint walkthrough](docs/SECRET_PROBE.md) includes private conf
 
 ## Why this MCP
 
-- Optional lazy tool loading: `PASSBOLT_TOOL_LOADING=lazy` starts with a small core plus `passbolt_enable_toolsets` and adds toolsets on demand (`tools/list_changed`). Startup cost (tools/list + instructions, ≈chars/4): eager ≈2448 tokens, lazy ≈1044 tokens (−57%). Default `eager` is unchanged; if your client ignores `tools/list_changed`, keep `eager` or reconnect after enabling.
+- Optional lazy tool loading: `PASSBOLT_TOOL_LOADING=lazy` starts with a small core plus `passbolt_enable_toolsets` and adds toolsets on demand (`tools/list_changed`). Startup cost (tools/list + instructions, ≈chars/4): eager ≈2448 tokens, lazy ≈1048 tokens (−57%). Default `eager` is unchanged; if your client ignores `tools/list_changed`, keep `eager` or reconnect after enabling. Scope: enablement is per MCP session (FastMCP session visibility), so one client's enabled toolsets never appear for another. The HTTP transport here is stateless (every request is its own session), so enabled toolsets do not persist there: for shared HTTP use `eager` or `PASSBOLT_TOOLSETS`.
 - No tool returns a password: secrets go only to operator-registered sinks (secure fill, file, HTTPS probe) and the assistant receives a status.
 - Toolsets (meta, read, use, write); `PASSBOLT_READ_ONLY=1` keeps metadata reads only; sharing follows an access policy.
 - Local `passbolt-mcp-doctor` checks keys and policy before connecting; supports Passbolt v5 resource types.
