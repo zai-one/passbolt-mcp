@@ -10,3 +10,5 @@ Read only the task-relevant public documentation. Personal workspace notes are o
 - [Contributing](../../CONTRIBUTING.md): development and release checks.
 
 Agent usage playbooks live in `skills/` and MCP `passbolt://playbook` / `passbolt://guide/{topic}`. Keep topic copies and installed resources consistent; run token-budget and clean-install checks before releases.
+
+- Repository maintenance, release checks and safety: read [maintenance rules](maintenance.md); preserve the listed checks, licenses and publication gates.
