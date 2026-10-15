@@ -28,14 +28,29 @@
 
 ## Почему этот MCP
 
+- Ленивая загрузка инструментов (опционально): `PASSBOLT_TOOL_LOADING=lazy` (или выбор в мастере настройки) — старт с небольшим ядром, наборы включаются по запросу; см. [Ленивая загрузка инструментов](#ленивая-загрузка-инструментов).
 - Ни один инструмент не возвращает пароль: секреты уходят только в зарегистрированные оператором приёмники (secure fill, файл, HTTPS-проба), ассистент получает статус.
 - Наборы инструментов (meta, read, use, write); `PASSBOLT_READ_ONLY=1` оставляет только чтение метаданных; шаринг по политике доступа.
 - Локальный `passbolt-mcp-doctor` проверяет ключи и политику до подключения; поддерживаются типы ресурсов Passbolt v5.
 - Другой Passbolt MCP на GitHub ([mapix-etnc/passbolt-mcp-server](https://github.com/mapix-etnc/passbolt-mcp-server), AGPL) без CI; [bitwarden/mcp-server](https://github.com/bitwarden/mcp-server) — официальный вариант для Bitwarden, не для Passbolt.
 
+## Ленивая загрузка инструментов
+
+Ленивая загрузка инструментов (опционально): `PASSBOLT_TOOL_LOADING=lazy` стартует с небольшим ядром и `passbolt_enable_toolsets`, остальные наборы включаются по запросу (`tools/list_changed`). Стоимость старта (tools/list + instructions, ≈символы/4): eager ≈2448 токенов, lazy ≈1048 токенов (−57%). По умолчанию `eager` — без изменений; если клиент не поддерживает `tools/list_changed`, оставьте `eager` или переподключитесь после включения. Область: включение действует в пределах MCP-сессии (session visibility FastMCP), включённые одним клиентом наборы не видны другому. HTTP-транспорт здесь stateless (каждый запрос — отдельная сессия), поэтому включение там не сохраняется: для общего HTTP используйте `eager` или `PASSBOLT_TOOLSETS`.
+
+Клиенты и `notifications/tools/list_changed` (проверено по официальной документации, changelog или заявлениям мейнтейнеров, 2026-10):
+
+| Клиент | `tools/list_changed` | Источник |
+|---|---|---|
+| Claude Code | Да (интерактивно: tools, prompts, resources; `-p`/Agent SDK: только tools) | [docs: Dynamic tool updates](https://code.claude.com/docs/en/mcp) |
+| VS Code (GitHub Copilot) | Да (dynamic tool discovery); новые инструменты могут стать доступны агенту только со следующего хода | [docs](https://code.visualstudio.com/api/extension-guides/ai/mcp), [#303012](https://github.com/microsoft/vscode/issues/303012) |
+| Gemini CLI | Да (обновляет реестр инструментов) | [PR #14375](https://github.com/google-gemini/gemini-cli/pull/14375), [PR #21050](https://github.com/google-gemini/gemini-cli/pull/21050) |
+| Cursor | Ненадёжно: регрессия в 3.12.x подтверждена командой Cursor; после включения перезапустите Cursor | [forum](https://forum.cursor.com/t/mcp-server-regression-does-not-reload-tools-disconnect-does-nothing-ignores-mcp-json-changes-etc/166216) |
+| Claude Desktop, Windsurf, Codex CLI, Cline, Zed, Continue | Не проверено: официальных данных нет; используйте `eager` или переподключитесь после включения | — |
+
 ## Поддержка и обновления
 
-- Проект активно поддерживает ZAI.ONE: текущая версия 0.5.0; изменения в [CHANGELOG.md](CHANGELOG.md) и [Releases](https://github.com/zai-one/passbolt-mcp/releases).
+- Проект активно поддерживает ZAI.ONE: текущая версия 0.6.0; изменения в [CHANGELOG.md](CHANGELOG.md) и [Releases](https://github.com/zai-one/passbolt-mcp/releases).
 - Встроенная проверка обновлений: попросите ассистента вызвать `passbolt_check_update` (публичный GitHub API, без учётных данных, с кэшем; ничего не устанавливается автоматически; отключение: `PASSBOLT_DISABLE_UPDATE_CHECK=1`).
 - Следует актуальным практикам MCP: аннотации инструментов (read-only / destructive), наборы инструментов и режим только чтения, `instructions` сервера, промпты и ресурсы, структурированные ошибки с подсказками, секреты не попадают в ответы, бюджет токенов описаний проверяется в тестах.
 - CI прогоняет тесты на Linux и Windows для каждого pull request.
@@ -115,6 +130,10 @@ uv run --frozen --extra standalone python scripts/verify_install.py
 Тесты используют синтетические данные и не проверяют ваши учётные записи.
 
 </details>
+
+## Подтверждение шаринга и opt-in наборы
+
+Прямо перед выполнением одобренного шаринга сервер спрашивает пользователя через MCP elicitation. `PASSBOLT_SHARE_ELICITATION`: `auto` (по умолчанию) спрашивает, только если клиент поддерживает elicitation, иначе достаточно подтверждения оператора; `required` отказывает, если клиент не умеет спрашивать; `off` отключает вопрос. Вопрос — одно обязательное поле «да/нет», согласием считается только accept с отмеченным полем. Он задаётся при действующем принятом подтверждении именно этого запроса и повторно, когда создание с шарингом возобновляет ещё не выполненный шаринг (первая попытка уже израсходовала подтверждение). Подтверждение оператора нужно всегда. `PASSBOLT_TOOLSETS=default,directory,organize` добавляет `passbolt_directory` (UUID и имена групп и пользователей, разрешённых политикой привязки для шаринга, без email; права на ресурс) и, с подтверждением оператора, `passbolt_move_resource`, `passbolt_move_folder`, `passbolt_unshare` (снимает права пользователей и групп, права владельца не трогает; права перечитываются прямо перед изменением, и вызов отклоняется, если выбранное право стало владельческим. Условного обновления прав в Passbolt нет, поэтому повышение в короткое окно между перечитыванием и изменением не ловится). Карта инструментов: `passbolt://guide/tool-map`.
 
 ## Обновления
 

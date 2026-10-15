@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+- Optional lazy tool loading (`PASSBOLT_TOOL_LOADING=eager|lazy`, default `eager` = unchanged): lazy lists a small core plus `passbolt_enable_toolsets` (toolsets with one-line description and token cost); enabling registers the tools at runtime and sends `notifications/tools/list_changed`. Allowlists, read-only mode and approval gates still apply. Setup wizard asks eager vs lazy. Startup tokens (tools/list + instructions, ≈chars/4): eager ≈2448, lazy ≈1048. Scope: enablement is per MCP session (FastMCP session visibility), so one client's enabled toolsets never appear for another. The HTTP transport here is stateless (every request is its own session), so enabled toolsets do not persist there: for shared HTTP use `eager` or `PASSBOLT_TOOLSETS`. README lazy section lists verified `tools/list_changed` client support with sources.
+- `passbolt_move_folder` (PUT /move/folder) and `passbolt_unshare` (share `{id, delete:true}`, owner permissions kept, resources simulated first) in the opt-in `organize` toolset, both approval-gated.
+- Shares now ask the user through MCP elicitation right before an approved share executes
+  (`passbolt_share_resource`, create resource/folder with `share_with_*`); decline/cancel aborts and is
+  audited. `PASSBOLT_SHARE_ELICITATION=auto|required|off` (default `auto`: prompt only when the client supports elicitation). Operator approval still required.
+- Elicitation is shown only for a valid accepted approval that matches the exact request (operation +
+  arguments digest); otherwise no prompt and the write is refused as before.
+- Opt-in `organize` toolset: `passbolt_move_resource` (approval-gated move to a folder or root).
+- Opt-in `directory` toolset: `passbolt_directory` (group/user UUIDs the binding policy allows as share targets; per-resource permissions).
+- `PASSBOLT_TOOLSETS` unset or `default` keeps the 0.5.0 surface; `all` now also adds the opt-in `directory` and `organize` toolsets (write tools there still need `PASSBOLT_WRITE_ENABLED` and operator approval).
+- Router generated from `ROUTES` with tool/skill/guide per line and playbook + `guide/tool-map` fallback.
+- Router eval: 23 RU/EN requests (paraphrases, negative cases); fails on any unreachable tool, skill or guide.
+- Security: resuming a create-with-share (resource or folder) whose share is still pending now asks the
+  share elicitation again under the current `PASSBOLT_SHARE_ELICITATION` mode, with or without `approval_id`
+  (the first attempt consumed the approval); before, the resume executed the share without a prompt. Completed
+  results still replay without a prompt.
+- Security: `passbolt_unshare` re-reads permissions right before the PUT and refuses (`provider_precondition_failed`,
+  nothing sent, key settled as failed) if a selected permission is gone, reassigned or became owner. Passbolt has
+  no conditional permission update, so a promotion in the short window after that re-read is still not caught.
+- Fix: the share elicitation form is a required boolean confirmation field instead of an empty form (deprecated
+  in FastMCP; hangs or renders blank in some clients, e.g. VS Code); consent needs accept with the box ticked.
+
 ## 0.5.0
 
 - License: LicenseRef-ZAI-ONE 2.0 (source-available). Free install and use for yourself and your organisation, including commercial work; issues and pull requests welcome; copying code into other projects, redistribution, embedding and competing hosted services need written permission. Earlier releases keep their LicenseRef-ZAI-ONE 1.0 terms (see NOTICE). README first screen: one-line scope, why this MCP, maintenance and update check.

@@ -4,12 +4,19 @@ import inspect
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from zai_passbolt import update_check
 from zai_passbolt.adapter import PassboltAccessPolicy, PassboltAdapter
-from zai_passbolt.transport import LocalPreDispatchDenied, ProviderError, ProviderHttpError, request_hash
+from zai_passbolt.elicitation import confirm_share, share_summary
+from zai_passbolt.transport import (
+    LocalPreDispatchDenied,
+    ProviderError,
+    ProviderHttpError,
+    ProviderPreconditionFailed,
+    request_hash,
+)
 
 # MCP tool annotations are client hints only; scopes, policies, approvals and
 # idempotency keys remain the enforcement.
@@ -346,6 +353,19 @@ def register_tools(server: Any, runtime: Any) -> None:
                         result={"error": "local_pre_dispatch_denied"},
                     )
                 raise
+            except ProviderPreconditionFailed:
+                # Raised only before any mutating request: a definitive failure, not unknown outcome.
+                if checkpoint_state is not None:
+                    await release_checkpoint()
+                else:
+                    await store.provider_write_settle(
+                        access.principal_id,
+                        "passbolt",
+                        key,
+                        status="failed",
+                        result={"error": "precondition_failed"},
+                    )
+                raise
             except ProviderHttpError as exc:
                 if checkpoint_state is not None:
                     await release_checkpoint()
@@ -515,6 +535,30 @@ def register_tools(server: Any, runtime: Any) -> None:
         return result
 
     @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
+    async def passbolt_directory(resource_id: str | None = None) -> dict[str, Any]:
+        """Groups/users UUIDs for sharing, or who can access one resource (resource_id). No emails."""
+        adapter, policy, resources, _folders, _vault_profile = await _passbolt_access_policy()
+        if resource_id is not None:
+            try:
+                resource_id = str(UUID(resource_id))
+            except (TypeError, ValueError) as exc:
+                raise PermissionError("Passbolt resource policy requires a UUID") from exc
+            if resources is not None and resource_id not in resources:
+                raise PermissionError("Passbolt resource policy denied")
+        result = await _provider_read(
+            "passbolt",
+            "directory",
+            {"resource_id": resource_id},
+            (lambda: adapter.resource_permissions(resource_id))
+            if resource_id is not None
+            # Only this binding's share targets: the rest of the vault's people stay invisible.
+            else (lambda: adapter.list_directory(group_ids=policy.group_ids, user_ids=policy.user_ids)),
+            validate=lambda: None,
+        )
+        await _passbolt_audit("passbolt:read", "directory", "success", resource_id=resource_id)
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:read"), annotations=VAULT_READ_ONLY)
     async def passbolt_list_folders() -> dict[str, Any]:
         """List folder metadata (id, name, parent, personal) within this binding's folder policy."""
         adapter, _policy, _resources, folders, _vault_profile = await _passbolt_access_policy()
@@ -585,6 +629,52 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         return public
 
+    async def _elicit_share(
+        operation: str,
+        arguments: dict[str, Any],
+        idempotency_key: str,
+        kind: str,
+        target: str,
+        groups: list[str],
+        users: list[str],
+        permission: str,
+        approval_id: str | None,
+    ) -> str | None:
+        """Ask the human via MCP elicitation before any call that will execute a share.
+
+        That is a fresh write with a valid accepted approval for this exact request, or a resume of a
+        create-with-share checkpoint for this key and request (its approval was consumed by the first
+        attempt, so the share is confirmed again under the current mode). No approval, a
+        wrong/expired/consumed one, a digest mismatch, or a completed/failed key: no prompt;
+        `_passbolt_write` then rejects (or replays an already-finished idempotent write) as before.
+        """
+        if not (groups or users):
+            return None
+        digest = request_hash({"provider": "passbolt", "operation": operation, "arguments": arguments})
+        existing = await store.provider_write_lookup(
+            current_access().principal_id, "passbolt", _passbolt_idempotency_key(idempotency_key)
+        )
+        if existing is not None:
+            if (
+                existing.get("request_hash") != digest
+                or existing.get("status") in {"applied", "failed"}
+                or _passbolt_write_checkpoint(operation, existing.get("result")) is None
+            ):
+                return None
+        elif approval_id is None:
+            return None
+        else:
+            try:
+                await _passbolt_matching_approval(operation, digest, approval_id)
+            except PermissionError:
+                return None
+        mode = getattr(settings, "passbolt_share_elicitation", "auto")
+        try:
+            return await confirm_share(share_summary(kind, target, groups, users, permission), mode)
+        except PermissionError:
+            await _passbolt_audit("passbolt:write", f"{operation}_elicitation", "denied")
+            raise
+
     @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CREATE)
     async def passbolt_create_resource(
         name: str,
@@ -634,6 +724,17 @@ def register_tools(server: Any, runtime: Any) -> None:
             "share_mode": share_mode,
             "resource_type": resource_type,
         }
+        await _elicit_share(
+            "create_resource",
+            arguments,
+            idempotency_key,
+            "resource",
+            name,
+            resolved_groups,
+            resolved_users,
+            "read",
+            approval_id,
+        )
 
         async def verify_secret_cleanup(value: dict[str, Any]) -> None:
             if secret_source.get("kind") != "sealed_ref" or not value.get("created"):
@@ -701,6 +802,138 @@ def register_tools(server: Any, runtime: Any) -> None:
         )
         if sealed_consumed:
             await _passbolt_audit("passbolt:write", "sealed_ref_consumed", "success", resource_id=resource_id)
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
+    async def passbolt_move_folder(
+        folder_id: str,
+        idempotency_key: str,
+        parent_id: str | None = None,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approval-gated move of one folder under another folder (or root when parent_id is omitted)."""
+        if not settings.passbolt_write_enabled:
+            await _passbolt_audit("passbolt:write", "move_folder", "disabled")
+            raise PermissionError("Passbolt write runtime is not enabled")
+        adapter, _policy, _resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            folder_id = str(UUID(folder_id))
+            parent_id = str(UUID(parent_id)) if parent_id is not None else None
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("Passbolt folder policy requires a UUID") from exc
+        if folders is not None and (
+            folder_id not in folders or parent_id is None or parent_id not in folders
+        ):
+            raise PermissionError("Passbolt folder policy denied")
+        arguments = {"folder_id": folder_id, "parent_id": parent_id}
+        try:
+            result = await _passbolt_write(
+                "move_folder",
+                arguments,
+                idempotency_key,
+                lambda: adapter.move_folder(folder_id, parent_id),
+                approval_id=approval_id,
+                approval_required=True,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:write", "move_folder", "error")
+            raise
+        await _passbolt_audit(
+            "passbolt:write",
+            "move_folder" if result.get("moved") else "move_folder_prepare",
+            "success" if result.get("moved") else "prepared",
+        )
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
+    async def passbolt_unshare(
+        kind: Literal["resource", "folder"],
+        target_id: str,
+        aro_ids: list[str],
+        idempotency_key: str,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approval-gated removal of user/group access to a resource or folder; owners are kept."""
+        if not settings.passbolt_write_enabled:
+            await _passbolt_audit("passbolt:write", "unshare", "disabled")
+            raise PermissionError("Passbolt write runtime is not enabled")
+        adapter, _policy, resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            target_id = str(UUID(target_id))
+            aro = sorted({str(UUID(item)) for item in aro_ids})
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PermissionError("Passbolt unshare policy requires UUIDs") from exc
+        if not aro or len(aro) > 100:
+            raise PermissionError("Passbolt unshare needs 1-100 user/group UUIDs")
+        allowed = resources if kind == "resource" else folders
+        if allowed is not None and target_id not in allowed:
+            raise PermissionError(f"Passbolt {kind} policy denied")
+        arguments = {"kind": kind, "target_id": target_id, "aro_ids": aro}
+        audited_id = target_id if kind == "resource" else None
+        try:
+            result = await _passbolt_write(
+                "unshare",
+                arguments,
+                idempotency_key,
+                lambda: adapter.unshare(kind, target_id, aro),
+                approval_id=approval_id,
+                approval_required=True,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:write", "unshare", "error", resource_id=audited_id)
+            raise
+        await _passbolt_audit(
+            "passbolt:write",
+            "unshare" if "removed" in result else "unshare_prepare",
+            "success" if "removed" in result else "prepared",
+            resource_id=audited_id,
+        )
+        return result
+
+    @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
+    async def passbolt_move_resource(
+        resource_id: str,
+        idempotency_key: str,
+        folder_id: str | None = None,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Approval-gated move of one resource into a folder (or root when folder_id is omitted)."""
+        if not settings.passbolt_write_enabled:
+            await _passbolt_audit("passbolt:write", "move_resource", "disabled", resource_id=resource_id)
+            raise PermissionError("Passbolt write runtime is not enabled")
+        adapter, _policy, resources, folders, _vault_profile = await _passbolt_access_policy()
+        try:
+            resource_id = str(UUID(resource_id))
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("Passbolt resource policy requires a UUID") from exc
+        if resources is not None and resource_id not in resources:
+            raise PermissionError("Passbolt resource policy denied")
+        if folder_id is not None:
+            try:
+                folder_id = str(UUID(folder_id))
+            except ValueError as exc:
+                raise PermissionError("Passbolt folder policy requires a UUID") from exc
+        if folders is not None and (folder_id is None or folder_id not in folders):
+            raise PermissionError("Passbolt folder policy denied")
+        arguments = {"resource_id": resource_id, "folder_id": folder_id}
+        try:
+            result = await _passbolt_write(
+                "move_resource",
+                arguments,
+                idempotency_key,
+                lambda: adapter.move_resource(resource_id, folder_id),
+                approval_id=approval_id,
+                approval_required=True,
+            )
+        except Exception:
+            await _passbolt_audit("passbolt:write", "move_resource", "error", resource_id=resource_id)
+            raise
+        await _passbolt_audit(
+            "passbolt:write",
+            "move_resource" if result.get("moved") else "move_resource_prepare",
+            "success" if result.get("moved") else "prepared",
+            resource_id=resource_id,
+        )
         return result
 
     @server.tool(auth=require_scopes("passbolt:write"), annotations=VAULT_CHANGE)
@@ -792,6 +1025,17 @@ def register_tools(server: Any, runtime: Any) -> None:
             "share_with_users": resolved_users,
             "share_mode": share_mode,
         }
+        await _elicit_share(
+            "create_folder",
+            arguments,
+            idempotency_key,
+            "folder",
+            name,
+            resolved_groups,
+            resolved_users,
+            "read",
+            approval_id,
+        )
         try:
             result = await _passbolt_write(
                 "create_folder",
@@ -862,6 +1106,17 @@ def register_tools(server: Any, runtime: Any) -> None:
             "permission": permission,
             "share_mode": share_mode,
         }
+        elicited = await _elicit_share(
+            "share_resource",
+            arguments,
+            idempotency_key,
+            "resource",
+            resource_id,
+            resolved_groups,
+            resolved_users,
+            permission,
+            approval_id,
+        )
         try:
             result = await _passbolt_write(
                 "share_resource",
@@ -885,6 +1140,8 @@ def register_tools(server: Any, runtime: Any) -> None:
             "success" if result.get("shared") else "prepared",
             resource_id=resource_id,
         )
+        if elicited:
+            result = {**result, "elicitation": elicited}
         return result
 
     @server.tool(auth=require_scopes("passbolt:use"), annotations=SECRET_USE)
